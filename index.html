@@ -186,7 +186,7 @@ tileToggle.onAdd=function(){
 tileToggle.addTo(map);
 
 /* Localisation GPS — suivi continu avec cercle de précision */
-map.locate({watch:true,enableHighAccuracy:true,maximumAge:5000});
+map.locate({watch:true,enableHighAccuracy:true,maximumAge:0,timeout:10000});
 let gpsMarker=null;
 let gpsAccuracy=null;
 let lastGpsPos=null;
