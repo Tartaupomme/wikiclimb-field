@@ -82,7 +82,12 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 <script>
 /* === PWA Service Worker === */
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('sw.js');
+  /* Virer les anciens SW qui avaient des chemins absolus (/) */
+  navigator.serviceWorker.getRegistrations().then(regs=>{
+    regs.forEach(r=>r.unregister());
+  }).then(()=>{
+    navigator.serviceWorker.register('./sw.js');
+  });
 }
 
 /* === IndexedDB pour photos + traces === */
