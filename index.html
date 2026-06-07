@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>WikiClimb Field</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
+#map { height:100vh; width:100%; }
+/* Remonter les contrôles Leaflet au-dessus de la status bar (36px) */
+.leaflet-bottom { bottom:36px !important; }
+
+/* Popup bloc */
+.bloc-popup { min-width:200px; }
+.bloc-popup h3 { margin:0 0 4px; font-size:15px; }
+.bloc-popup .grade { display:inline-block; background:#f97316; color:#fff; padding:1px 8px; border-radius:10px; font-size:13px; font-weight:bold; }
+.bloc-popup .circuit { font-size:12px; color:#888; margin-top:2px; }
+.bloc-popup img { width:100%; border-radius:6px; margin:6px 0; }
+.bloc-popup .actions { display:flex; gap:6px; margin-top:6px; }
+.bloc-popup .btn { flex:1; padding:8px; border:none; border-radius:6px; font-size:13px; font-weight:bold; cursor:pointer; text-align:center; }
+.bloc-btn-photo { background:#3b82f6; color:#fff; }
+.bloc-btn-done { background:#22c55e; color:#fff; }
+
+/* Status bar */
+#status-bar { position:fixed; bottom:0; left:0; right:0; background:rgba(0,0,0,.85); color:#fff; padding:8px 16px; font-size:12px; z-index:1000; display:flex; justify-content:space-between; align-items:center; }
+#status-bar .sync-btn { background:#f97316; border:none; color:#fff; padding:4px 12px; border-radius:4px; font-size:12px; cursor:pointer; }
+
+/* Photo modal */
+#photo-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.95); z-index:2000; flex-direction:column; }
+#photo-modal.active { display:flex; }
+#photo-modal .toolbar { padding:8px 12px; display:flex; justify-content:space-between; align-items:center; background:#111; }
+#photo-modal .toolbar button { background:#333; border:none; color:#fff; padding:6px 14px; border-radius:6px; font-size:14px; cursor:pointer; }
+#photo-modal .toolbar .save-btn { background:#22c55e; }
+#photo-modal .toolbar .cancel-btn { background:#ef4444; }
+#photo-canvas-wrap { flex:1; position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#000; }
+#photo-canvas-wrap img { max-width:100%; max-height:100%; display:block; }
+#trace-svg { position:absolute; pointer-events:auto; }
+
+/* Hidden file input */
+#camera-input { display:none; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="status-bar">
+  <span id="status-text">Chargement...</span>
+  <div style="display:flex;gap:6px;align-items:center">
+    <span id="gps-info" style="color:#4285F4;font-weight:bold">GPS: ...</span>
+    <button onclick="exportData()" style="background:#3b82f6;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">Exporter</button>
+  </div>
+</div>
+
+<!-- Input camera cache -->
+<input type="file" id="camera-input" accept="image/*" capture="environment">
+
+<!-- Modal trace sur photo -->
+<div id="photo-modal">
+  <div class="toolbar">
+    <button class="cancel-btn" onclick="closePhotoModal()">Fermer</button>
+    <span id="modal-title" style="color:#fff;font-weight:bold;font-size:13px"></span>
+    <button class="save-btn" onclick="saveAndClose()">OK</button>
+  </div>
+  <div id="bloc-list-bar" style="background:#222;padding:6px 8px;display:flex;gap:4px;overflow-x:auto;align-items:center;flex-wrap:wrap">
+    <div id="bloc-chips" style="display:flex;gap:4px;flex:1;overflow-x:auto;flex-wrap:wrap"></div>
+    <button onclick="startLinkMode()" style="background:#3b82f6;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">+ Lier bloc</button>
+  </div>
+  <div id="photo-canvas-wrap">
+    <img id="photo-img">
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+/* === PWA Service Worker === */
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js');
+}
+
+/* === IndexedDB pour photos + traces === */
+const DB_NAME='wc-field';
+const DB_VER=1;
+let db;
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(DB_NAME,DB_VER);
+    req.onupgradeneeded=e=>{
+      const d=e.target.result;
+      if(!d.objectStoreNames.contains('photos')){
+        d.createObjectStore('photos',{keyPath:'id',autoIncrement:true});
+      }
+    };
+    req.onsuccess=e=>{db=e.target.result;resolve(db)};
+    req.onerror=e=>reject(e);
+  });
+}
+function addPhoto(data){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readwrite');
+    const store=tx.objectStore('photos');
+    const req=store.add(data);
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=e=>reject(e);
+  });
+}
+function getAllPhotos(){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readonly');
+    const store=tx.objectStore('photos');
+    const req=store.getAll();
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=e=>reject(e);
+  });
+}
+function updatePhoto(data){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readwrite');
+    const store=tx.objectStore('photos');
+    const req=store.put(data);
+    req.onsuccess=()=>resolve();
+    req.onerror=e=>reject(e);
+  });
+}
+function deletePhoto(id){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readwrite');
+    const store=tx.objectStore('photos');
+    const req=store.delete(id);
+    req.onsuccess=()=>resolve();
+    req.onerror=e=>reject(e);
+  });
+}
+
+/* === Etat global === */
+let blocsData=null,rochersData=null,droneData=null,boulderGroups=null;
+let blocMarkers={};/* id -> L.circleMarker */
+let photosMap={};/* blocId -> [{photoId, hasTrace}] */
+let currentBlocId=null;
+let currentPhotoId=null;
+let tracePoints=[];
+let drawing=false;
+
+/* === Carte === */
+const ign=L.tileLayer('https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',{maxZoom:22,maxNativeZoom:19,attribution:'IGN'});
+const osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:22,maxNativeZoom:19,attribution:'OSM'});
+
+let currentTile='ign';
+const map=L.map('map',{
+  layers:[ign],
+  zoomControl:false,
+  attributionControl:false
+}).setView([48.41,2.63],13);
+
+L.control.zoom({position:'topright'}).addTo(map);
+
+/* Toggle IGN / Carte — bouton simple en haut à droite */
+const tileToggle=L.control({position:'topright'});
+tileToggle.onAdd=function(){
+  const btn=L.DomUtil.create('div','');
+  btn.innerHTML='<button id="tile-btn" style="display:flex;align-items:center;justify-content:center;padding:6px 12px;background:#fff;border:2px solid rgba(0,0,0,.2);border-radius:4px;font-size:13px;font-weight:bold;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3);color:#333">Carte</button>';
+  btn.querySelector('button').onclick=function(){
+    if(currentTile==='ign'){
+      map.removeLayer(ign); map.addLayer(osm); currentTile='osm';
+      this.textContent='IGN';
+    } else {
+      map.removeLayer(osm); map.addLayer(ign); currentTile='ign';
+      this.textContent='Carte';
+    }
+  };
+  L.DomEvent.disableClickPropagation(btn);
+  return btn;
+};
+tileToggle.addTo(map);
+
+/* Localisation GPS — suivi continu avec cercle de précision */
+map.locate({watch:true,enableHighAccuracy:true,maximumAge:5000});
+let gpsMarker=null;
+let gpsAccuracy=null;
+let lastGpsPos=null;
+let followGps=true; /* centrer la carte sur la position au démarrage */
+
+map.on('locationfound',e=>{
+  lastGpsPos=e.latlng;
+  const acc=e.accuracy; /* précision en mètres */
+
+  if(!gpsMarker){
+    /* Point bleu */
+    gpsMarker=L.circleMarker(e.latlng,{radius:8,color:'#fff',fillColor:'#4285F4',fillOpacity:1,weight:3}).addTo(map);
+    /* Cercle de précision */
+    gpsAccuracy=L.circle(e.latlng,{radius:acc,color:'#4285F4',fillColor:'#4285F4',fillOpacity:0.1,weight:1,interactive:false}).addTo(map);
+    /* Premier fix : centrer la carte */
+    map.setView(e.latlng,17);
+  } else {
+    gpsMarker.setLatLng(e.latlng);
+    gpsAccuracy.setLatLng(e.latlng);
+    gpsAccuracy.setRadius(acc);
+  }
+
+  /* Suivre la position si le mode "follow" est actif */
+  if(followGps) map.panTo(e.latlng);
+
+  /* Afficher la précision dans la status bar */
+  document.getElementById('gps-info').textContent='GPS: '+Math.round(acc)+'m';
+});
+
+map.on('locationerror',e=>{
+  document.getElementById('gps-info').textContent='GPS: erreur';
+});
+
+/* Arrêter le suivi auto quand l'utilisateur déplace la carte manuellement */
+map.on('dragstart',()=>{ followGps=false; });
+
+/* Bouton "centrer sur moi" */
+const gpsBtn=L.control({position:'bottomright'});
+gpsBtn.onAdd=function(){
+  const div=L.DomUtil.create('div','leaflet-bar');
+  div.innerHTML='<a href="#" title="Centrer sur ma position" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;background:#fff;font-size:20px;text-decoration:none;color:#4285F4;border-radius:4px;box-shadow:0 1px 5px rgba(0,0,0,.3)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><line x1="12" y1="1" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="1" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="23" y2="12"/></svg></a>';
+  div.querySelector('a').onclick=function(e){
+    e.preventDefault();
+    if(lastGpsPos){
+      followGps=true;
+      map.setView(lastGpsPos,Math.max(map.getZoom(),17));
+    }
+  };
+  L.DomEvent.disableClickPropagation(div);
+  return div;
+};
+gpsBtn.addTo(map);
+
+/* === Chargement des donnees === */
+async function loadData(){
+  const[blocsR,rochersR,droneR,groupsR]=await Promise.all([
+    fetch('boolder-blocs.geojson').then(r=>r.json()),
+    fetch('boolder-rochers.geojson').then(r=>r.json()),
+    fetch('drone-missions.json').then(r=>r.json()),
+    fetch('boulder-groups.json').then(r=>r.json())
+  ]);
+  blocsData=blocsR;
+  rochersData=rochersR;
+  droneData=droneR;
+  boulderGroups=groupsR;
+
+  /* Contours de rochers (polygones gris) */
+  L.geoJSON(rochersData,{
+    style:{color:'#9ca3af',weight:1,fillColor:'#6b7280',fillOpacity:0.3},
+    interactive:false
+  }).addTo(map);
+
+  /* Points des blocs — dans un MarkerClusterGroup pour regrouper quand dézoomé */
+  const blocCluster=L.markerClusterGroup({
+    maxClusterRadius:40,
+    disableClusteringAtZoom:18, /* individuel à partir du zoom 18 */
+    spiderfyOnMaxZoom:false,
+    showCoverageOnHover:false,
+    iconCreateFunction:function(cluster){
+      const n=cluster.getChildCount();
+      let size='small', radius=30;
+      if(n>=50){ size='large'; radius=40; }
+      else if(n>=10){ size='medium'; radius=35; }
+      return L.divIcon({
+        html:'<div style="display:flex;align-items:center;justify-content:center;width:'+radius+'px;height:'+radius+'px;border-radius:50%;background:rgba(239,68,68,0.7);border:2px solid #fff;color:#fff;font-weight:bold;font-size:'+(n>=100?'11':'13')+'px;box-shadow:0 1px 4px rgba(0,0,0,.4)">'+n+'</div>',
+        className:'',
+        iconSize:[radius,radius]
+      });
+    }
+  });
+  blocsData.features.forEach(f=>{
+    const[lon,lat]=f.geometry.coordinates;
+    const p=f.properties;
+    const id=p.id;
+    const marker=L.circleMarker([lat,lon],{
+      radius:5,weight:1,
+      color:'#fff',fillColor:getBlocColor(id),fillOpacity:0.9
+    });
+    marker.on('click',()=>handleBlocClick(id,lat,lon,p));
+    blocMarkers[id]=marker;
+    blocCluster.addLayer(marker);
+  });
+  map.addLayer(blocCluster);
+
+  /* === Contours colorés par groupe PHOTO (blocs sur la même face = même cadrage) ===
+     Données : photo-groups.json, extrait de la table lines/topos de Boolder.
+     Blocs partageant le même topo_id apparaissent sur la même photo.
+     Visible à partir du zoom 17 pour ne pas surcharger la carte de loin.
+     Chaque groupe reçoit une couleur distincte (palette de 10 couleurs). */
+  const GROUP_COLORS=['#f97316','#3b82f6','#a855f7','#ec4899','#06b6d4','#eab308','#22c55e','#ef4444','#8b5cf6','#14b8a6'];
+  const groupLayer=L.layerGroup();
+
+  /* Index rapide : id -> [lat, lon] depuis les features GeoJSON */
+  const blocCoords={};
+  blocsData.features.forEach(f=>{
+    const[lon,lat]=f.geometry.coordinates;
+    blocCoords[f.properties.id]=[lat,lon];
+  });
+
+  /* Charger les groupes photo (blocs partageant la même photo Boolder) */
+  const photoGroupsR=await fetch('photo-groups.json').then(r=>r.json());
+
+  photoGroupsR.forEach((group,gi)=>{
+    const color=GROUP_COLORS[gi%GROUP_COLORS.length];
+    group.forEach(bid=>{
+      const coords=blocCoords[bid];
+      if(!coords) return;
+      L.circleMarker(coords,{
+        radius:10, weight:2.5, color:color,
+        fill:false, opacity:0.7, interactive:false
+      }).addTo(groupLayer);
+    });
+  });
+
+  /* Afficher les halos seulement quand on est assez zoomé (>= 17) */
+  function updateGroupVisibility(){
+    if(map.getZoom()>=17) { if(!map.hasLayer(groupLayer)) map.addLayer(groupLayer); }
+    else { if(map.hasLayer(groupLayer)) map.removeLayer(groupLayer); }
+  }
+  map.on('zoomend',updateGroupVisibility);
+  updateGroupVisibility();
+
+  /* === BLOCS DE TEST — rue Héléna Fournier, Tours ===
+     À supprimer avant la mise en production */
+  const TEST_BLOCS=[
+    {id:99001,name:'Test Mur Nord',grade:'5a',lat:47.41995,lon:0.70720},
+    {id:99002,name:'Test Dalle Est',grade:'4b',lat:47.41988,lon:0.70755},
+    {id:99003,name:'Test Dévers',grade:'6a',lat:47.41978,lon:0.70740},
+    {id:99004,name:'Test Traverse',grade:'5c',lat:47.41983,lon:0.70710},
+    {id:99005,name:'Test Pilier',grade:'3b',lat:47.42005,lon:0.70760},
+    {id:99006,name:'Test Fissure',grade:'6b',lat:47.42010,lon:0.70700},
+  ];
+  /* Injecter dans blocsData pour que les popups marchent */
+  TEST_BLOCS.forEach(tb=>{
+    blocsData.features.push({
+      type:'Feature',
+      geometry:{type:'Point',coordinates:[tb.lon,tb.lat]},
+      properties:{id:tb.id,name:tb.name,grade:tb.grade}
+    });
+    const marker=L.circleMarker([tb.lat,tb.lon],{
+      radius:5,weight:1,color:'#fff',fillColor:getBlocColor(tb.id),fillOpacity:0.9
+    });
+    marker.on('click',()=>handleBlocClick(tb.id,tb.lat,tb.lon,tb));
+    blocMarkers[tb.id]=marker;
+    blocCluster.addLayer(marker);
+  });
+  /* Groupe photo test : les 3 premiers sont sur la même "face" */
+  photoGroupsR.push([99001,99002,99004]);
+
+  /* Points drone (depart/arrivee) + trajet au clic */
+  let activeDronePath=null;
+  droneData.forEach(m=>{
+    const wps=m.waypoints;
+    if(!wps||wps.length<2)return;
+    const startMarker=L.marker([wps[0][0],wps[0][1]],{icon:L.divIcon({
+      className:'',
+      html:'<div style="background:#16a34a;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;border:1px solid #fff;white-space:nowrap;cursor:pointer">'+m.vol+'</div>',
+      iconAnchor:[10,10]
+    })}).addTo(map);
+    const endMarker=L.marker([wps[wps.length-1][0],wps[wps.length-1][1]],{icon:L.divIcon({
+      className:'',
+      html:'<div style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;border:1px solid #fff;white-space:nowrap;cursor:pointer">'+m.vol+'</div>',
+      iconAnchor:[10,10]
+    })}).addTo(map);
+    function showDronePath(){
+      if(activeDronePath){map.removeLayer(activeDronePath);activeDronePath=null}
+      activeDronePath=L.polyline(wps,{color:'#f97316',weight:2.5,opacity:0.9}).addTo(map);
+      activeDronePath.bindPopup('<b>Vol '+m.vol+'</b> — '+m.sector+'<br>'+m.time+' min | '+wps.length+' wp<br><button onclick=\"map.removeLayer(activeDronePath);activeDronePath=null;map.closePopup()\" style=\"margin-top:4px;padding:2px 8px;border:1px solid #ccc;border-radius:4px;cursor:pointer\">Masquer</button>').openPopup();
+    }
+    startMarker.on('click',showDronePath);
+    endMarker.on('click',showDronePath);
+  });
+
+  /* Charger les photos existantes depuis IndexedDB */
+  await refreshPhotoState();
+  updateStatus();
+}
+
+function getBlocColor(id){
+  if(photosMap[id]) return '#22c55e';/* photo prise = vert */
+  return '#ef4444';/* pas de photo = rouge */
+}
+
+function updateBlocColor(id){
+  if(blocMarkers[id]){
+    blocMarkers[id].setStyle({fillColor:getBlocColor(id)});
+  }
+}
+
+async function refreshPhotoState(){
+  const photos=await getAllPhotos();
+  photosMap={};
+  photos.forEach(p=>{
+    (p.blocIds||[]).forEach(bid=>{
+      if(!photosMap[bid])photosMap[bid]=[];
+      photosMap[bid].push({photoId:p.id,hasTrace:!!p.trace});
+    });
+  });
+  /* Mettre a jour les couleurs */
+  Object.keys(blocMarkers).forEach(id=>updateBlocColor(parseInt(id)));
+}
+
+/* === Popup bloc === */
+function openBlocPopup(id,lat,lon,props){
+  currentBlocId=id;
+  const status=photosMap[id]?
+    (photosMap[id].some(p=>p.hasTrace)?'<span style="color:#22c55e">Valide</span>':'<span style="color:#f97316">Photo OK</span>'):
+    '<span style="color:#ef4444">Pas de photo</span>';
+
+  const boolderUrl=props.url||'';
+  /* Recuperer la photo existante pour ce bloc */
+  let photoHtml='';
+  if(photosMap[id]){
+    const photoId=photosMap[id][photosMap[id].length-1].photoId;
+    photoHtml='<div id="popup-photo-wrap-'+id+'" style="position:relative;margin:6px 0;cursor:pointer" onclick="openTraceMode('+id+')"><img id="popup-photo-'+id+'" style="width:100%;border-radius:6px;max-height:200px;object-fit:cover;display:block"><svg id="popup-svg-'+id+'" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none" viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div>';
+    /* Charger l image + traces depuis IndexedDB apres le rendu */
+    setTimeout(()=>{
+      const tx=db.transaction('photos','readonly');
+      const req=tx.objectStore('photos').get(photoId);
+      req.onsuccess=()=>{
+        if(!req.result)return;
+        const el=document.getElementById('popup-photo-'+id);
+        if(el)el.src=req.result.image;
+        /* Dessiner les traces */
+        const svgEl=document.getElementById('popup-svg-'+id);
+        if(svgEl&&req.result.traces){
+          const bids=req.result.blocIds||[];
+          bids.forEach((bid,i)=>{
+            const t=req.result.traces[bid];
+            if(!t||t.length<2)return;
+            const color=TRACE_COLORS[i%TRACE_COLORS.length];
+            const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+            path.setAttribute('fill','none');
+            path.setAttribute('stroke',color);
+            path.setAttribute('stroke-width','1.5');
+            path.setAttribute('stroke-linecap','round');
+            path.setAttribute('d',catmullRomToSVG(t));
+            svgEl.appendChild(path);
+          });
+        }
+      };
+    },50);
+  }
+  const html=`<div class="bloc-popup">
+    <h3>${props.name||'Bloc #'+id}</h3>
+    <span class="grade">${props.grade||'?'}</span> ${status}
+    ${props.circuitColor?'<div class="circuit">Circuit '+props.circuitColor+' #'+(props.circuitNumber||'')+'</div>':''}
+    ${photoHtml}
+    ${!photosMap[id]&&boolderUrl?'<a href="'+boolderUrl+'" target="_blank" style="display:block;margin:6px 0;color:#3b82f6;font-size:12px">Voir sur Boolder</a>':''}
+    <div class="actions">
+      <button class="btn bloc-btn-photo" onclick="takePhoto(${id})">${photosMap[id]?'Nouvelle photo':'Photo'}</button>
+      ${photosMap[id]?'<button class="btn bloc-btn-done" onclick="openPhotoView('+id+')">Voir / Lier</button>':''}
+    </div>
+  </div>`;
+
+  L.popup({maxWidth:280}).setLatLng([lat,lon]).setContent(html).openOn(map);
+}
+
+/* === Prise de photo === */
+function takePhoto(blocId){
+  currentBlocId=blocId;
+  document.getElementById('camera-input').click();
+}
+
+document.getElementById('camera-input').addEventListener('change',async function(e){
+  const file=e.target.files[0];
+  if(!file)return;
+
+  /* Lire en base64 */
+  const reader=new FileReader();
+  reader.onload=async function(){
+    /* Lier automatiquement les blocs du meme rocher */
+    const linkedIds=[currentBlocId];
+    const siblings=boulderGroups?boulderGroups[currentBlocId]:null;
+    if(siblings){siblings.forEach(sid=>{if(!linkedIds.includes(sid))linkedIds.push(sid)})}
+
+    const photoData={
+      blocIds:linkedIds,
+      image:reader.result,
+      latitude:lastGpsPos?lastGpsPos.lat:null,
+      longitude:lastGpsPos?lastGpsPos.lng:null,
+      timestamp:Date.now(),
+      synced:false
+    };
+    const photoId=await addPhoto(photoData);
+    await refreshPhotoState();
+    updateStatus();
+    map.closePopup();
+
+    /* Ouvrir la vue photo pour lier d'autres blocs */
+    currentPhotoId=photoId;
+    const tx2=db.transaction('photos','readonly');
+    const req2=tx2.objectStore('photos').get(photoId);
+    req2.onsuccess=()=>{if(req2.result)openPhotoModal(req2.result)};
+  };
+  reader.readAsDataURL(file);
+  e.target.value='';/* reset */
+});
+
+/* === Mode photo (association blocs) === */
+const CHIP_COLORS=['#f97316','#3b82f6','#22c55e','#a855f7','#ec4899','#eab308','#06b6d4','#ef4444'];
+let currentPhotoData=null;
+let linkMode=false;
+
+function openPhotoView(blocId){
+  const photos=photosMap[blocId];
+  if(!photos||!photos.length)return;
+  const photoId=photos[photos.length-1].photoId;
+  currentBlocId=blocId;
+  currentPhotoId=photoId;
+  const tx=db.transaction('photos','readonly');
+  const req=tx.objectStore('photos').get(photoId);
+  req.onsuccess=()=>{if(req.result)openPhotoModal(req.result)};
+}
+
+function openPhotoModal(photoData){
+  currentPhotoData=photoData;
+  currentPhotoId=photoData.id;
+  linkMode=false;
+  document.getElementById('photo-img').src=photoData.image;
+  document.getElementById('photo-modal').classList.add('active');
+  map.closePopup();
+  renderBlocChips();
+}
+
+function closePhotoModal(){
+  document.getElementById('photo-modal').classList.remove('active');
+  linkMode=false;
+  currentPhotoData=null;
+}
+
+function saveAndClose(){
+  closePhotoModal();
+}
+
+/* Chips des blocs lies a la photo */
+function renderBlocChips(){
+  const container=document.getElementById('bloc-chips');
+  const ids=currentPhotoData.blocIds||[];
+  let html='';
+  ids.forEach((bid,i)=>{
+    const feat=blocsData.features.find(f=>f.properties.id===bid);
+    const name=feat?(feat.properties.name||'#'+bid)+'<span style="font-size:10px;opacity:.7"> '+feat.properties.grade+'</span>':'#'+bid;
+    const color=CHIP_COLORS[i%CHIP_COLORS.length];
+    html+='<span style="background:'+color+';color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">'
+      +name+'<button onclick="unlinkBloc('+bid+')" style="border:none;background:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:13px;padding:0 2px">&times;</button></span>';
+  });
+  container.innerHTML=html;
+  document.getElementById('modal-title').textContent=ids.length+' bloc(s)';
+}
+
+/* Retirer un bloc de la photo */
+async function unlinkBloc(bid){
+  if(!currentPhotoData)return;
+  currentPhotoData.blocIds=currentPhotoData.blocIds.filter(id=>id!==bid);
+  await updatePhoto(currentPhotoData);
+  await refreshPhotoState();
+  updateStatus();
+  renderBlocChips();
+}
+
+/* Mode liaison : cliquer sur la carte pour ajouter des blocs */
+function startLinkMode(){
+  linkMode=true;
+  closePhotoModal();
+  document.getElementById('status-text').textContent='Cliquez sur un bloc pour le lier...';
+}
+
+/* Clic sur un bloc */
+function handleBlocClick(id,lat,lon,props){
+  if(linkMode){
+    if(!currentPhotoData.blocIds.includes(id)){
+      currentPhotoData.blocIds.push(id);
+      updatePhoto(currentPhotoData).then(()=>refreshPhotoState()).then(()=>{
+        updateStatus();
+        openPhotoModal(currentPhotoData);
+      });
+    }else{
+      openPhotoModal(currentPhotoData);
+    }
+    linkMode=false;
+    return;
+  }
+  openBlocPopup(id,lat,lon,props);
+}
+
+/* Catmull-Rom pour l'affichage des traces dans les popups (tracees sur WikiClimb) */
+function catmullRomToSVG(points){
+  if(points.length<2)return'';
+  if(points.length===2)return'M'+points[0].x+','+points[0].y+'L'+points[1].x+','+points[1].y;
+  let d='M'+points[0].x+','+points[0].y;
+  for(let i=0;i<points.length-1;i++){
+    const p0=points[Math.max(i-1,0)],p1=points[i],p2=points[i+1],p3=points[Math.min(i+2,points.length-1)];
+    const t=0.3;
+    const cp1x=parseFloat(p1.x)+(parseFloat(p2.x)-parseFloat(p0.x))*t;
+    const cp1y=parseFloat(p1.y)+(parseFloat(p2.y)-parseFloat(p0.y))*t;
+    const cp2x=parseFloat(p2.x)-(parseFloat(p3.x)-parseFloat(p1.x))*t;
+    const cp2y=parseFloat(p2.y)-(parseFloat(p3.y)-parseFloat(p1.y))*t;
+    d+='C'+cp1x.toFixed(2)+','+cp1y.toFixed(2)+' '+cp2x.toFixed(2)+','+cp2y.toFixed(2)+' '+p2.x+','+p2.y;
+  }
+  return d;
+}
+
+/* === Sync serveur === */
+const SYNC_URL='/api/field/photos';/* relatif au serveur WikiClimb */
+
+async function syncPhotos(){
+  const photos=await getAllPhotos();
+  const unsynced=photos.filter(p=>!p.synced);
+  if(!unsynced.length){
+    alert('Tout est synchronise !');
+    return;
+  }
+
+  const statusEl=document.getElementById('status-text');
+  let success=0,errors=0;
+
+  for(let i=0;i<unsynced.length;i++){
+    statusEl.textContent=`Sync ${i+1}/${unsynced.length}...`;
+    try{
+      /* Convertir le base64 en blob */
+      const resp=await fetch(unsynced[i].image);
+      const blob=await resp.blob();
+
+      /* Construire le FormData */
+      const fd=new FormData();
+      fd.append('photo',blob,'field-photo.jpg');
+      fd.append('blocIds',JSON.stringify(unsynced[i].blocIds||[]));
+      if(unsynced[i].latitude)fd.append('latitude',String(unsynced[i].latitude));
+      if(unsynced[i].longitude)fd.append('longitude',String(unsynced[i].longitude));
+
+      /* Envoyer au serveur */
+      const res=await fetch(SYNC_URL,{method:'POST',body:fd,credentials:'include'});
+      if(res.ok){
+        unsynced[i].synced=true;
+        unsynced[i].serverId=(await res.json()).id;
+        await updatePhoto(unsynced[i]);
+        success++;
+      }else{
+        const err=await res.json().catch(()=>({error:'Erreur'}));
+        console.error('Sync erreur:',err);
+        errors++;
+      }
+    }catch(e){
+      console.error('Sync erreur reseau:',e);
+      errors++;
+    }
+  }
+
+  updateStatus();
+  if(errors)alert(success+' photos syncees, '+errors+' erreurs');
+  else alert(success+' photos synchronisees !');
+}
+
+/* Liberer l'espace : supprimer les photos syncees du telephone */
+async function cleanSynced(){
+  const photos=await getAllPhotos();
+  const synced=photos.filter(p=>p.synced);
+  if(!synced.length){alert('Rien a nettoyer');return}
+  if(!confirm(synced.length+' photos syncees seront supprimees du telephone. Continuer ?'))return;
+  for(const p of synced) await deletePhoto(p.id);
+  await refreshPhotoState();
+  updateStatus();
+  alert(synced.length+' photos supprimees du telephone');
+}
+
+/* === Exporter toutes les données (photos + associations) en JSON téléchargeable === */
+async function exportData(){
+  const photos=await getAllPhotos();
+  if(!photos.length){ alert('Aucune photo à exporter'); return; }
+
+  const statusEl=document.getElementById('status-text');
+  statusEl.textContent='Export en cours...';
+
+  /* Construire l'export : chaque photo avec ses métadonnées */
+  const exportPhotos=photos.map(p=>({
+    id:p.id,
+    blocIds:p.blocIds||[],
+    latitude:p.latitude,
+    longitude:p.longitude,
+    timestamp:p.timestamp,
+    image:p.image, /* base64 complet */
+    traces:p.traces||null
+  }));
+
+  const exportObj={
+    version:1,
+    exportDate:new Date().toISOString(),
+    photoCount:exportPhotos.length,
+    photos:exportPhotos
+  };
+
+  /* Générer le fichier et déclencher le téléchargement */
+  const json=JSON.stringify(exportObj);
+  const blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='wikiclimb-field-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  statusEl.textContent=photos.length+' photos exportées';
+  setTimeout(updateStatus,3000);
+}
+
+/* === Vider toutes les photos de l'IndexedDB (après export) === */
+async function clearAllPhotos(){
+  const photos=await getAllPhotos();
+  if(!photos.length){ alert('Aucune photo à supprimer'); return; }
+  if(!confirm(photos.length+' photo(s) seront supprimées du téléphone.\nAssure-toi d\'avoir exporté avant !\n\nContinuer ?')) return;
+  for(const p of photos) await deletePhoto(p.id);
+  await refreshPhotoState();
+  updateStatus();
+  alert(photos.length+' photo(s) supprimées');
+}
+
+/* === Status bar === */
+async function updateStatus(){
+  const photos=await getAllPhotos();
+  const total=photos.length;
+
+  document.getElementById('status-text').textContent=
+    total>0 ? total+' photo'+(total>1?'s':'') : 'Prêt';
+}
+
+/* === Init === */
+openDB().then(()=>loadData());
+</script>
+</body>
+</html>
