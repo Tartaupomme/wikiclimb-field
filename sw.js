@@ -1,14 +1,14 @@
-const CACHE_NAME = 'wc-field-v5';
+const CACHE_NAME = 'wc-field-v6';
 
 // Fichiers essentiels mis en cache à l'installation
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/boolder-blocs.geojson',
-  '/boolder-rochers.geojson',
-  '/drone-missions.json',
-  '/boulder-groups.json',
-  '/photo-groups.json',
+  './',
+  './index.html',
+  './boolder-blocs.geojson',
+  './boolder-rochers.geojson',
+  './drone-missions.json',
+  './boulder-groups.json',
+  './photo-groups.json',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
   'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css',
