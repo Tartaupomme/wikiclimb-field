@@ -42,20 +42,8 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 #photo-canvas-wrap img { max-width:100%; max-height:100%; display:block; }
 #trace-svg { position:absolute; pointer-events:auto; }
 
-/* Crop modal */
-#crop-modal { display:none; position:fixed; inset:0; background:#000; z-index:3000; flex-direction:column; }
-#crop-modal.active { display:flex; }
-#crop-modal .toolbar { padding:8px 12px; display:flex; justify-content:space-between; align-items:center; background:#111; flex-shrink:0; }
-#crop-modal .toolbar button { background:#333; border:none; color:#fff; padding:8px 16px; border-radius:6px; font-size:14px; font-weight:bold; cursor:pointer; }
-#crop-modal .toolbar .crop-ok { background:#22c55e; }
-#crop-modal .toolbar .crop-cancel { background:#ef4444; }
-#crop-area { flex:1; position:relative; overflow:hidden; touch-action:none; }
-#crop-area img { position:absolute; transform-origin:0 0; }
-#crop-box { position:absolute; border:2px solid #fff; box-shadow:0 0 0 9999px rgba(0,0,0,.6); pointer-events:none; }
-#crop-handle { position:absolute; bottom:-14px; right:-14px; width:28px; height:28px; background:#fff; border-radius:50%; pointer-events:auto; touch-action:none; cursor:nwse-resize; box-shadow:0 1px 4px rgba(0,0,0,.5); }
-
 /* Toggle controls en haut a gauche */
-#map-toggles { position:fixed; top:10px; left:10px; z-index:1000; display:flex; flex-direction:column; gap:4px; }
+#map-toggles { position:fixed; top:10px; left:10px; z-index:800; display:flex; flex-direction:column; gap:4px; }
 #map-toggles button { display:flex; align-items:center; gap:6px; padding:6px 10px; background:#fff; border:2px solid rgba(0,0,0,.2); border-radius:4px; font-size:12px; font-weight:600; cursor:pointer; box-shadow:0 1px 5px rgba(0,0,0,.3); color:#333; white-space:nowrap; }
 #map-toggles button.active { background:#464E2E; color:#fff; border-color:#464E2E; }
 #map-toggles button .dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
@@ -84,19 +72,6 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
     <span id="gps-info" style="color:#4285F4;font-weight:bold">GPS: ...</span>
     <button onclick="syncPhotos()" style="background:#22c55e;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:bold">Sync</button>
     <button onclick="exportData()" style="background:#3b82f6;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">JSON</button>
-  </div>
-</div>
-
-<!-- Crop modal (cadrage carre) -->
-<div id="crop-modal">
-  <div class="toolbar">
-    <button class="crop-cancel" onclick="closeCrop()">Annuler</button>
-    <span style="color:#fff;font-weight:bold;font-size:13px">Cadrage carré</span>
-    <button class="crop-ok" onclick="applyCrop()">OK</button>
-  </div>
-  <div id="crop-area">
-    <img id="crop-img">
-    <div id="crop-box"></div>
   </div>
 </div>
 
@@ -565,117 +540,13 @@ function takePhoto(blocId){
   document.getElementById('camera-input').click();
 }
 
-/* === Crop carré (cadrage après prise de photo) === */
-let cropResolve=null; /* callback quand le crop est fini */
-let cropImgNatW=0,cropImgNatH=0;
-
-function openCrop(imageSrc){
-  return new Promise(resolve=>{
-    cropResolve=resolve;
-    const img=document.getElementById('crop-img');
-    img.onload=function(){
-      cropImgNatW=img.naturalWidth;
-      cropImgNatH=img.naturalHeight;
-      const area=document.getElementById('crop-area');
-      const aW=area.clientWidth, aH=area.clientHeight;
-      /* Cadre carré fixe, collé aux bords */
-      const boxSize=Math.min(aW,aH);
-      const box=document.getElementById('crop-box');
-      box.style.width=boxSize+'px';
-      box.style.height=boxSize+'px';
-      box.style.left=((aW-boxSize)/2)+'px';
-      box.style.top=((aH-boxSize)/2)+'px';
-      /* Image assez grande pour couvrir le carré */
-      const scale=Math.max(boxSize/cropImgNatW, boxSize/cropImgNatH);
-      img.style.width=(cropImgNatW*scale)+'px';
-      img.style.height=(cropImgNatH*scale)+'px';
-      /* Centrer l'image dans le carré */
-      const bx=parseFloat(box.style.left), by=parseFloat(box.style.top);
-      img.style.left=(bx+(boxSize-cropImgNatW*scale)/2)+'px';
-      img.style.top=(by+(boxSize-cropImgNatH*scale)/2)+'px';
-      img._scale=scale;
-    };
-    img.src=imageSrc;
-    document.getElementById('crop-modal').classList.add('active');
-    initCropTouch();
-  });
-}
-
-function closeCrop(){
-  document.getElementById('crop-modal').classList.remove('active');
-  if(cropResolve){cropResolve(null);cropResolve=null}
-}
-
-function applyCrop(){
-  const img=document.getElementById('crop-img');
-  const box=document.getElementById('crop-box');
-  const scale=img._scale;
-  const imgLeft=parseFloat(img.style.left);
-  const imgTop=parseFloat(img.style.top);
-  const boxLeft=parseFloat(box.style.left);
-  const boxTop=parseFloat(box.style.top);
-  const boxSize=parseFloat(box.style.width);
-  /* Coordonnées dans l'image originale */
-  const sx=(boxLeft-imgLeft)/scale;
-  const sy=(boxTop-imgTop)/scale;
-  const sSize=boxSize/scale;
-  const canvas=document.createElement('canvas');
-  const outputSize=Math.min(Math.round(sSize),1200);
-  canvas.width=outputSize;
-  canvas.height=outputSize;
-  const ctx=canvas.getContext('2d');
-  ctx.drawImage(img,sx,sy,sSize,sSize,0,0,outputSize,outputSize);
-  const result=canvas.toDataURL('image/jpeg',0.9);
-  document.getElementById('crop-modal').classList.remove('active');
-  if(cropResolve){cropResolve(result);cropResolve=null}
-}
-
-/* Touch: déplacer l'IMAGE derrière le cadre fixe */
-function initCropTouch(){
-  const area=document.getElementById('crop-area');
-  const img=document.getElementById('crop-img');
-  const box=document.getElementById('crop-box');
-  let dragging=false, startX, startY, startL, startT;
-
-  area.onpointerdown=function(e){
-    dragging=true;
-    startX=e.clientX; startY=e.clientY;
-    startL=parseFloat(img.style.left); startT=parseFloat(img.style.top);
-    e.preventDefault();
-  };
-  area.onpointermove=function(e){
-    if(!dragging)return;
-    const dx=e.clientX-startX, dy=e.clientY-startY;
-    let newL=startL+dx, newT=startT+dy;
-    /* Clamper : l'image ne peut pas sortir du carré */
-    const bx=parseFloat(box.style.left), by=parseFloat(box.style.top);
-    const bSize=parseFloat(box.style.width);
-    const imgW=parseFloat(img.style.width), imgH=parseFloat(img.style.height);
-    /* Bord droit de l'image >= bord droit du carré */
-    if(newL+imgW < bx+bSize) newL=bx+bSize-imgW;
-    /* Bord gauche de l'image <= bord gauche du carré */
-    if(newL > bx) newL=bx;
-    /* Pareil verticalement */
-    if(newT+imgH < by+bSize) newT=by+bSize-imgH;
-    if(newT > by) newT=by;
-    img.style.left=newL+'px';
-    img.style.top=newT+'px';
-    e.preventDefault();
-  };
-  area.onpointerup=function(){dragging=false};
-}
-
-/* === Prise de photo → crop → sauvegarde === */
+/* === Prise de photo → sauvegarde directe === */
 document.getElementById('camera-input').addEventListener('change',async function(e){
   const file=e.target.files[0];
   if(!file)return;
 
   const reader=new FileReader();
   reader.onload=async function(){
-    /* Ouvrir le crop carré */
-    const croppedImage=await openCrop(reader.result);
-    if(!croppedImage)return; /* annulé */
-
     /* Lier automatiquement les blocs du meme rocher */
     const linkedIds=[currentBlocId];
     const siblings=photoGroupMap[currentBlocId]||null;
@@ -683,7 +554,7 @@ document.getElementById('camera-input').addEventListener('change',async function
 
     const photoData={
       blocIds:linkedIds,
-      image:croppedImage,
+      image:reader.result,
       latitude:lastGpsPos?lastGpsPos.lat:null,
       longitude:lastGpsPos?lastGpsPos.lng:null,
       timestamp:Date.now(),
