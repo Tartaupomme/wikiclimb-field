@@ -247,7 +247,7 @@ map.on('locationerror',e=>{
 map.on('dragstart',()=>{ followGps=false; });
 
 /* Bouton "centrer sur moi" */
-const gpsBtn=L.control({position:'bottomright'});
+const gpsBtn=L.control({position:'bottomleft'});
 gpsBtn.onAdd=function(){
   const div=L.DomUtil.create('div','leaflet-bar');
   div.innerHTML='<a href="#" title="Centrer sur ma position" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;background:#fff;font-size:20px;text-decoration:none;color:#4285F4;border-radius:4px;box-shadow:0 1px 5px rgba(0,0,0,.3)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><line x1="12" y1="1" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="1" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="23" y2="12"/></svg></a>';
