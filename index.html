@@ -290,7 +290,7 @@ gpsBtn.addTo(map);
 /* === Chargement des donnees === */
 async function loadData(){
   const[blocsR,rochersR,droneR,groupsR,parkingsR]=await Promise.all([
-    fetch('boolder-blocs.geojson').then(r=>r.json()),
+    fetch('wc-blocs.geojson').then(r=>r.json()),
     fetch('boolder-rochers.geojson').then(r=>r.json()),
     fetch('drone-missions.json').then(r=>r.json()),
     fetch('boulder-groups.json').then(r=>r.json()),
@@ -377,17 +377,15 @@ async function loadData(){
   map.on('zoomend',updateGroupVisibility);
   updateGroupVisibility();
 
-  /* === BLOCS DE TEST — rue Héléna Fournier, Tours ===
-     À supprimer avant la mise en production */
+  /* === BLOCS DE TEST — rue Helena Fournier, Tours === */
   const TEST_BLOCS=[
-    {id:99001,name:'Test Mur Nord',grade:'5a',lat:47.41995,lon:0.70720},
-    {id:99002,name:'Test Dalle Est',grade:'4b',lat:47.41988,lon:0.70755},
-    {id:99003,name:'Test Dévers',grade:'6a',lat:47.41978,lon:0.70740},
-    {id:99004,name:'Test Traverse',grade:'5c',lat:47.41983,lon:0.70710},
-    {id:99005,name:'Test Pilier',grade:'3b',lat:47.42005,lon:0.70760},
-    {id:99006,name:'Test Fissure',grade:'6b',lat:47.42010,lon:0.70700},
+    {id:'test-001',name:'Test Mur Nord',grade:'5a',lat:47.41995,lon:0.70720},
+    {id:'test-002',name:'Test Dalle Est',grade:'4b',lat:47.41988,lon:0.70755},
+    {id:'test-003',name:'Test Dévers',grade:'6a',lat:47.41978,lon:0.70740},
+    {id:'test-004',name:'Test Traverse',grade:'5c',lat:47.41983,lon:0.70710},
+    {id:'test-005',name:'Test Pilier',grade:'3b',lat:47.42005,lon:0.70760},
+    {id:'test-006',name:'Test Fissure',grade:'6b',lat:47.42010,lon:0.70700},
   ];
-  /* Injecter dans blocsData pour que les popups marchent */
   TEST_BLOCS.forEach(tb=>{
     blocsData.features.push({
       type:'Feature',
@@ -395,14 +393,12 @@ async function loadData(){
       properties:{id:tb.id,name:tb.name,grade:tb.grade}
     });
     const marker=L.circleMarker([tb.lat,tb.lon],{
-      radius:5,weight:1,color:'#fff',fillColor:getBlocColor(tb.id),fillOpacity:0.9
+      radius:8,weight:1.5,color:'#fff',fillColor:getBlocColor(tb.id),fillOpacity:0.9
     });
     marker.on('click',()=>handleBlocClick(tb.id,tb.lat,tb.lon,tb));
     blocMarkers[tb.id]=marker;
     blocCluster.addLayer(marker);
   });
-  /* Groupe photo test : les 3 premiers sont sur la même "face" */
-  photoGroupsR.push([99001,99002,99004]);
 
   /* Points drone (depart/arrivee) + trajet au clic */
   let activeDronePath=null;
@@ -499,7 +495,7 @@ async function refreshPhotoState(){
     });
   });
   /* Mettre a jour les couleurs */
-  Object.keys(blocMarkers).forEach(id=>updateBlocColor(parseInt(id)));
+  Object.keys(blocMarkers).forEach(id=>updateBlocColor(id));
 }
 
 /* === Popup bloc === */
