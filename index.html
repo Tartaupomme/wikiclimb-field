@@ -42,6 +42,12 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 #photo-canvas-wrap img { max-width:100%; max-height:100%; display:block; }
 #trace-svg { position:absolute; pointer-events:auto; }
 
+/* Toggle controls en haut a gauche */
+#map-toggles { position:fixed; top:10px; left:10px; z-index:1000; display:flex; flex-direction:column; gap:4px; }
+#map-toggles button { display:flex; align-items:center; gap:6px; padding:6px 10px; background:#fff; border:2px solid rgba(0,0,0,.2); border-radius:4px; font-size:12px; font-weight:600; cursor:pointer; box-shadow:0 1px 5px rgba(0,0,0,.3); color:#333; white-space:nowrap; }
+#map-toggles button.active { background:#464E2E; color:#fff; border-color:#464E2E; }
+#map-toggles button .dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+
 /* Hidden file input */
 #camera-input { display:none; }
 </style>
@@ -49,6 +55,16 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 <body>
 
 <div id="map"></div>
+
+<!-- Toggle blocs/rochers et parkings -->
+<div id="map-toggles">
+  <button id="toggle-blocs" class="active" onclick="toggleBlocs()">
+    <span class="dot" style="background:#ef4444"></span> Blocs
+  </button>
+  <button id="toggle-parkings" class="active" onclick="toggleParkings()">
+    <span class="dot" style="background:#3b82f6"></span> Parkings
+  </button>
+</div>
 
 <div id="status-bar">
   <span id="status-text">Chargement...</span>
@@ -148,6 +164,11 @@ function deletePhoto(id){
 /* === Etat global === */
 let blocsData=null,rochersData=null,droneData=null,boulderGroups=null;
 let blocMarkers={};/* id -> L.circleMarker */
+let blocCluster=null;/* MarkerClusterGroup des blocs */
+let rochersLayer=null;/* GeoJSON des contours de rochers */
+let parkingLayer=null;/* LayerGroup des parkings */
+let blocsVisible=true;
+let parkingsVisible=true;
 let photosMap={};/* blocId -> [{photoId, hasTrace}] */
 let currentBlocId=null;
 let currentPhotoId=null;
@@ -243,11 +264,12 @@ gpsBtn.addTo(map);
 
 /* === Chargement des donnees === */
 async function loadData(){
-  const[blocsR,rochersR,droneR,groupsR]=await Promise.all([
+  const[blocsR,rochersR,droneR,groupsR,parkingsR]=await Promise.all([
     fetch('boolder-blocs.geojson').then(r=>r.json()),
     fetch('boolder-rochers.geojson').then(r=>r.json()),
     fetch('drone-missions.json').then(r=>r.json()),
-    fetch('boulder-groups.json').then(r=>r.json())
+    fetch('boulder-groups.json').then(r=>r.json()),
+    fetch('parkings.json').then(r=>r.json()).catch(()=>[])
   ]);
   blocsData=blocsR;
   rochersData=rochersR;
@@ -255,13 +277,13 @@ async function loadData(){
   boulderGroups=groupsR;
 
   /* Contours de rochers (polygones gris) */
-  L.geoJSON(rochersData,{
+  rochersLayer=L.geoJSON(rochersData,{
     style:{color:'#9ca3af',weight:1,fillColor:'#6b7280',fillOpacity:0.3},
     interactive:false
   }).addTo(map);
 
   /* Points des blocs — dans un MarkerClusterGroup pour regrouper quand dézoomé */
-  const blocCluster=L.markerClusterGroup({
+  blocCluster=L.markerClusterGroup({
     maxClusterRadius:40,
     disableClusteringAtZoom:17, /* individuel à partir du zoom 17 */
     spiderfyOnMaxZoom:false,
@@ -381,9 +403,54 @@ async function loadData(){
     endMarker.on('click',showDronePath);
   });
 
+  /* === Parkings (marqueurs bleus, cliquables → ouvrir dans Maps) === */
+  parkingLayer=L.layerGroup();
+  const parkingIcon=L.divIcon({
+    className:'',
+    html:'<div style="width:24px;height:24px;background:#3b82f6;border:2px solid #fff;border-radius:5px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:12px;box-shadow:0 1px 4px rgba(0,0,0,.4)">P</div>',
+    iconSize:[24,24],iconAnchor:[12,12],popupAnchor:[0,-12]
+  });
+  parkingsR.forEach(p=>{
+    if(!p.lat||!p.lon)return;
+    const mapsUrl='https://www.google.com/maps/dir/?api=1&destination='+p.lat+','+p.lon+'&travelmode=walking';
+    const popupHtml='<div style="min-width:140px"><strong>'+p.name+'</strong>'
+      +(p.capacity?'<br><span style="font-size:12px;color:#666">'+p.capacity+' places</span>':'')
+      +(p.fee?'<br><span style="font-size:11px;color:#ef4444;font-weight:600">Payant</span>':'')
+      +'<br><a href="'+mapsUrl+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;padding:5px 12px;background:#3b82f6;color:#fff;border-radius:6px;font-size:12px;font-weight:bold;text-decoration:none">Ouvrir dans Maps</a></div>';
+    L.marker([p.lat,p.lon],{icon:parkingIcon}).bindPopup(popupHtml).addTo(parkingLayer);
+  });
+  parkingLayer.addTo(map);
+
   /* Charger les photos existantes depuis IndexedDB */
   await refreshPhotoState();
   updateStatus();
+}
+
+/* === Toggle blocs/rochers et parkings === */
+function toggleBlocs(){
+  blocsVisible=!blocsVisible;
+  const btn=document.getElementById('toggle-blocs');
+  if(blocsVisible){
+    if(blocCluster) map.addLayer(blocCluster);
+    if(rochersLayer) map.addLayer(rochersLayer);
+    btn.classList.add('active');
+  }else{
+    if(blocCluster) map.removeLayer(blocCluster);
+    if(rochersLayer) map.removeLayer(rochersLayer);
+    btn.classList.remove('active');
+  }
+}
+
+function toggleParkings(){
+  parkingsVisible=!parkingsVisible;
+  const btn=document.getElementById('toggle-parkings');
+  if(parkingsVisible){
+    if(parkingLayer) map.addLayer(parkingLayer);
+    btn.classList.add('active');
+  }else{
+    if(parkingLayer) map.removeLayer(parkingLayer);
+    btn.classList.remove('active');
+  }
 }
 
 function getBlocColor(id){
