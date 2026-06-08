@@ -96,7 +96,7 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
   </div>
   <div id="crop-area">
     <img id="crop-img">
-    <div id="crop-box"><div id="crop-handle"></div></div>
+    <div id="crop-box"></div>
   </div>
 </div>
 
@@ -578,21 +578,22 @@ function openCrop(imageSrc){
       cropImgNatH=img.naturalHeight;
       const area=document.getElementById('crop-area');
       const aW=area.clientWidth, aH=area.clientHeight;
-      /* Adapter l'image pour remplir la zone */
-      const scale=Math.max(aW/cropImgNatW, aH/cropImgNatH);
-      img.style.width=(cropImgNatW*scale)+'px';
-      img.style.height=(cropImgNatH*scale)+'px';
-      img.style.left=((aW-cropImgNatW*scale)/2)+'px';
-      img.style.top=((aH-cropImgNatH*scale)/2)+'px';
-      img._scale=scale;
-      /* Carre centre, le plus grand possible */
+      /* Cadre carré fixe, collé aux bords */
       const boxSize=Math.min(aW,aH);
       const box=document.getElementById('crop-box');
       box.style.width=boxSize+'px';
       box.style.height=boxSize+'px';
       box.style.left=((aW-boxSize)/2)+'px';
       box.style.top=((aH-boxSize)/2)+'px';
-      box._size=boxSize;
+      /* Image assez grande pour couvrir le carré */
+      const scale=Math.max(boxSize/cropImgNatW, boxSize/cropImgNatH);
+      img.style.width=(cropImgNatW*scale)+'px';
+      img.style.height=(cropImgNatH*scale)+'px';
+      /* Centrer l'image dans le carré */
+      const bx=parseFloat(box.style.left), by=parseFloat(box.style.top);
+      img.style.left=(bx+(boxSize-cropImgNatW*scale)/2)+'px';
+      img.style.top=(by+(boxSize-cropImgNatH*scale)/2)+'px';
+      img._scale=scale;
     };
     img.src=imageSrc;
     document.getElementById('crop-modal').classList.add('active');
@@ -609,7 +610,6 @@ function applyCrop(){
   const img=document.getElementById('crop-img');
   const box=document.getElementById('crop-box');
   const scale=img._scale;
-  /* Position du carré par rapport à l'image */
   const imgLeft=parseFloat(img.style.left);
   const imgTop=parseFloat(img.style.top);
   const boxLeft=parseFloat(box.style.left);
@@ -619,9 +619,8 @@ function applyCrop(){
   const sx=(boxLeft-imgLeft)/scale;
   const sy=(boxTop-imgTop)/scale;
   const sSize=boxSize/scale;
-  /* Dessiner dans un canvas carré */
   const canvas=document.createElement('canvas');
-  const outputSize=Math.min(Math.round(sSize),1200); /* max 1200px */
+  const outputSize=Math.min(Math.round(sSize),1200);
   canvas.width=outputSize;
   canvas.height=outputSize;
   const ctx=canvas.getContext('2d');
@@ -631,48 +630,39 @@ function applyCrop(){
   if(cropResolve){cropResolve(result);cropResolve=null}
 }
 
-/* Touch: déplacer le carré + redimensionner via la poignée */
+/* Touch: déplacer l'IMAGE derrière le cadre fixe */
 function initCropTouch(){
   const area=document.getElementById('crop-area');
+  const img=document.getElementById('crop-img');
   const box=document.getElementById('crop-box');
-  const handle=document.getElementById('crop-handle');
-  let dragging=false, resizing=false, startX, startY, startL, startT, startSize;
+  let dragging=false, startX, startY, startL, startT;
 
-  function getTouch(e){return e.touches?e.touches[0]:e}
-
-  /* Déplacement du carré */
   area.onpointerdown=function(e){
-    if(e.target===handle)return;
-    dragging=true; resizing=false;
+    dragging=true;
     startX=e.clientX; startY=e.clientY;
-    startL=parseFloat(box.style.left); startT=parseFloat(box.style.top);
+    startL=parseFloat(img.style.left); startT=parseFloat(img.style.top);
     e.preventDefault();
   };
   area.onpointermove=function(e){
-    if(!dragging&&!resizing)return;
+    if(!dragging)return;
     const dx=e.clientX-startX, dy=e.clientY-startY;
-    if(dragging){
-      box.style.left=(startL+dx)+'px';
-      box.style.top=(startT+dy)+'px';
-    }
-    if(resizing){
-      /* Garder le ratio 1:1, agrandir vers le bas-droite */
-      const delta=Math.max(dx,dy);
-      const newSize=Math.max(80,startSize+delta);
-      box.style.width=newSize+'px';
-      box.style.height=newSize+'px';
-    }
+    let newL=startL+dx, newT=startT+dy;
+    /* Clamper : l'image ne peut pas sortir du carré */
+    const bx=parseFloat(box.style.left), by=parseFloat(box.style.top);
+    const bSize=parseFloat(box.style.width);
+    const imgW=parseFloat(img.style.width), imgH=parseFloat(img.style.height);
+    /* Bord droit de l'image >= bord droit du carré */
+    if(newL+imgW < bx+bSize) newL=bx+bSize-imgW;
+    /* Bord gauche de l'image <= bord gauche du carré */
+    if(newL > bx) newL=bx;
+    /* Pareil verticalement */
+    if(newT+imgH < by+bSize) newT=by+bSize-imgH;
+    if(newT > by) newT=by;
+    img.style.left=newL+'px';
+    img.style.top=newT+'px';
     e.preventDefault();
   };
-  area.onpointerup=function(){dragging=false;resizing=false};
-
-  /* Redimensionnement via la poignée */
-  handle.onpointerdown=function(e){
-    resizing=true; dragging=false;
-    startX=e.clientX; startY=e.clientY;
-    startSize=parseFloat(box.style.width);
-    e.stopPropagation(); e.preventDefault();
-  };
+  area.onpointerup=function(){dragging=false};
 }
 
 /* === Prise de photo → crop → sauvegarde === */
