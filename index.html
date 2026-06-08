@@ -580,8 +580,8 @@ function openCrop(imageSrc){
       img.style.left=((aW-cropImgNatW*scale)/2)+'px';
       img.style.top=((aH-cropImgNatH*scale)/2)+'px';
       img._scale=scale;
-      /* Carre centre, le plus grand possible (petit padding de 16px) */
-      const boxSize=Math.min(aW,aH)-32;
+      /* Carre centre, le plus grand possible */
+      const boxSize=Math.min(aW,aH);
       const box=document.getElementById('crop-box');
       box.style.width=boxSize+'px';
       box.style.height=boxSize+'px';
