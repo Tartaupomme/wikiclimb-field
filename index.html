@@ -54,7 +54,8 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
   <span id="status-text">Chargement...</span>
   <div style="display:flex;gap:6px;align-items:center">
     <span id="gps-info" style="color:#4285F4;font-weight:bold">GPS: ...</span>
-    <button onclick="exportData()" style="background:#3b82f6;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">Exporter</button>
+    <button onclick="syncPhotos()" style="background:#22c55e;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:bold">Sync</button>
+    <button onclick="exportData()" style="background:#3b82f6;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">JSON</button>
   </div>
 </div>
 
@@ -610,16 +611,19 @@ function catmullRomToSVG(points){
   return d;
 }
 
-/* === Sync serveur === */
-const SYNC_URL='/api/field/photos';/* relatif au serveur WikiClimb */
+/* === Sync serveur WikiClimb === */
+const SYNC_URL='https://wiki-climb.com/api/field/photos';
+const FIELD_TOKEN='ce8b9a228b00c5a0d177af8b758d9a2a16cd14f517104fcaaa3c41519c709b2e';
 
 async function syncPhotos(){
   const photos=await getAllPhotos();
   const unsynced=photos.filter(p=>!p.synced);
   if(!unsynced.length){
-    alert('Tout est synchronise !');
+    alert('Tout est synchronisé !');
     return;
   }
+
+  if(!confirm(unsynced.length+' photo(s) à envoyer vers wiki-climb.com.\nContinuer ?'))return;
 
   const statusEl=document.getElementById('status-text');
   let success=0,errors=0;
@@ -638,8 +642,12 @@ async function syncPhotos(){
       if(unsynced[i].latitude)fd.append('latitude',String(unsynced[i].latitude));
       if(unsynced[i].longitude)fd.append('longitude',String(unsynced[i].longitude));
 
-      /* Envoyer au serveur */
-      const res=await fetch(SYNC_URL,{method:'POST',body:fd,credentials:'include'});
+      /* Envoyer au serveur avec le token d'auth */
+      const res=await fetch(SYNC_URL,{
+        method:'POST',
+        body:fd,
+        headers:{'X-Field-Token':FIELD_TOKEN}
+      });
       if(res.ok){
         unsynced[i].synced=true;
         unsynced[i].serverId=(await res.json()).id;
@@ -651,14 +659,14 @@ async function syncPhotos(){
         errors++;
       }
     }catch(e){
-      console.error('Sync erreur reseau:',e);
+      console.error('Sync erreur réseau:',e);
       errors++;
     }
   }
 
   updateStatus();
-  if(errors)alert(success+' photos syncees, '+errors+' erreurs');
-  else alert(success+' photos synchronisees !');
+  if(errors)alert(success+' photo(s) envoyées, '+errors+' erreur(s)');
+  else alert(success+' photo(s) envoyées sur wiki-climb.com !');
 }
 
 /* Liberer l'espace : supprimer les photos syncees du telephone */
@@ -730,9 +738,15 @@ async function clearAllPhotos(){
 async function updateStatus(){
   const photos=await getAllPhotos();
   const total=photos.length;
+  const unsynced=photos.filter(p=>!p.synced).length;
 
-  document.getElementById('status-text').textContent=
-    total>0 ? total+' photo'+(total>1?'s':'') : 'Prêt';
+  let text='Prêt';
+  if(total>0){
+    text=total+' photo'+(total>1?'s':'');
+    if(unsynced>0) text+=' ('+unsynced+' à sync)';
+    else text+=' (tout sync)';
+  }
+  document.getElementById('status-text').textContent=text;
 }
 
 /* === Init === */
