@@ -510,7 +510,7 @@ function openBlocPopup(id,lat,lon,props){
   let photoHtml='';
   if(photosMap[id]){
     const photoId=photosMap[id][photosMap[id].length-1].photoId;
-    photoHtml='<div id="popup-photo-wrap-'+id+'" style="position:relative;margin:6px 0;cursor:pointer" onclick="openTraceMode('+id+')"><img id="popup-photo-'+id+'" style="width:100%;border-radius:6px;max-height:200px;object-fit:cover;display:block"><svg id="popup-svg-'+id+'" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none" viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div>';
+    photoHtml='<div id="popup-photo-wrap-'+id+'" style="position:relative;margin:6px 0;cursor:pointer" onclick="openTraceMode(\''+id+'\')"><img id="popup-photo-'+id+'" style="width:100%;border-radius:6px;max-height:200px;object-fit:cover;display:block"><svg id="popup-svg-'+id+'" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none" viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div>';
     /* Charger l image + traces depuis IndexedDB apres le rendu */
     setTimeout(()=>{
       const tx=db.transaction('photos','readonly');
@@ -546,8 +546,8 @@ function openBlocPopup(id,lat,lon,props){
     ${photoHtml}
     ${!photosMap[id]&&boolderUrl?'<a href="'+boolderUrl+'" target="_blank" style="display:block;margin:6px 0;color:#3b82f6;font-size:12px">Voir sur Boolder</a>':''}
     <div class="actions">
-      <button class="btn bloc-btn-photo" onclick="takePhoto(${id})">${photosMap[id]?'Nouvelle photo':'Photo'}</button>
-      ${photosMap[id]?'<button class="btn bloc-btn-done" onclick="openPhotoView('+id+')">Voir / Lier</button>':''}
+      <button class="btn bloc-btn-photo" onclick="takePhoto('${id}')">${photosMap[id]?'Nouvelle photo':'Photo'}</button>
+      ${photosMap[id]?'<button class="btn bloc-btn-done" onclick="openPhotoView(\''+id+'\')">Voir / Lier</button>':''}
     </div>
   </div>`;
 
@@ -755,7 +755,7 @@ function renderBlocChips(){
     const name=feat?(feat.properties.name||'#'+bid)+'<span style="font-size:10px;opacity:.7"> '+feat.properties.grade+'</span>':'#'+bid;
     const color=CHIP_COLORS[i%CHIP_COLORS.length];
     html+='<span style="background:'+color+';color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">'
-      +name+'<button onclick="unlinkBloc('+bid+')" style="border:none;background:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:13px;padding:0 2px">&times;</button></span>';
+      +name+'<button onclick="unlinkBloc(\''+bid+'\')" style="border:none;background:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:13px;padding:0 2px">&times;</button></span>';
   });
   container.innerHTML=html;
   document.getElementById('modal-title').textContent=ids.length+' bloc(s)';
