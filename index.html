@@ -355,7 +355,7 @@ async function loadData(){
   });
 
   /* Charger les groupes photo (blocs partageant la même photo Boolder) */
-  const photoGroupsR=await fetch('photo-groups.json').then(r=>r.json());
+  const photoGroupsR=await fetch('photo-groups-wc.json').then(r=>r.json());
 
   photoGroupsR.forEach((group,gi)=>{
     const color=GROUP_COLORS[gi%GROUP_COLORS.length];
@@ -505,7 +505,7 @@ function openBlocPopup(id,lat,lon,props){
     (photosMap[id].some(p=>p.hasTrace)?'<span style="color:#22c55e">Valide</span>':'<span style="color:#f97316">Photo OK</span>'):
     '<span style="color:#ef4444">Pas de photo</span>';
 
-  const boolderUrl=props.url||'';
+  const boolderUrl=props.boolderUrl||props.url||'';
   /* Recuperer la photo existante pour ce bloc */
   let photoHtml='';
   if(photosMap[id]){
