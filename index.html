@@ -188,6 +188,7 @@ function deletePhoto(id){
 
 /* === Etat global === */
 let blocsData=null,rochersData=null,droneData=null,boulderGroups=null;
+let photoGroupMap={};/* wcId -> [wcId, ...] — blocs sur la même photo */
 let blocMarkers={};/* id -> L.circleMarker */
 let blocCluster=null;/* MarkerClusterGroup des blocs */
 let rochersLayer=null;/* GeoJSON des contours de rochers */
@@ -359,6 +360,10 @@ async function loadData(){
 
   photoGroupsR.forEach((group,gi)=>{
     const color=GROUP_COLORS[gi%GROUP_COLORS.length];
+    /* Construire le lookup : chaque bloc → ses siblings */
+    group.forEach(bid=>{
+      photoGroupMap[bid]=group.filter(id=>id!==bid);
+    });
     group.forEach(bid=>{
       const coords=blocCoords[bid];
       if(!coords) return;
@@ -683,7 +688,7 @@ document.getElementById('camera-input').addEventListener('change',async function
 
     /* Lier automatiquement les blocs du meme rocher */
     const linkedIds=[currentBlocId];
-    const siblings=boulderGroups?boulderGroups[currentBlocId]:null;
+    const siblings=photoGroupMap[currentBlocId]||null;
     if(siblings){siblings.forEach(sid=>{if(!linkedIds.includes(sid))linkedIds.push(sid)})}
 
     const photoData={
