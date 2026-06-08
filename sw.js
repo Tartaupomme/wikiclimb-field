@@ -1,14 +1,15 @@
-const CACHE_NAME = 'wc-field-v6';
+const CACHE_NAME = 'wc-field-v7';
 
 // Fichiers essentiels mis en cache à l'installation
 const ASSETS = [
   './',
   './index.html',
-  './boolder-blocs.geojson',
+  './wc-blocs.geojson',
   './boolder-rochers.geojson',
   './drone-missions.json',
   './boulder-groups.json',
-  './photo-groups.json',
+  './photo-groups-wc.json',
+  './parkings.json',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
   'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css',
@@ -43,7 +44,6 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
   // Tuiles carte : network-first, puis cache en fallback
-  // Les tuiles visitées en ligne sont gardées pour l'offline
   if (TILE_HOSTS.some(h => url.hostname.includes(h))) {
     e.respondWith(
       fetch(e.request)
@@ -59,7 +59,26 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Autres fichiers : cache-first (assets installés)
+  // API WikiClimb (sync photos) : toujours réseau, jamais cache
+  if (url.hostname === 'wiki-climb.com') {
+    e.respondWith(fetch(e.request));
+    return;
+  }
+
+  // Autres fichiers : network-first pour index.html, cache-first pour le reste
+  if (e.request.url.includes('index.html') || e.request.url.endsWith('/')) {
+    e.respondWith(
+      fetch(e.request)
+        .then(resp => {
+          const clone = resp.clone();
+          caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+          return resp;
+        })
+        .catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
   e.respondWith(
     caches.match(e.request).then(r => r || fetch(e.request))
   );
