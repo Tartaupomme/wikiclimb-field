@@ -295,7 +295,7 @@ let blocsVisible=true;
 let parkingsVisible=true;
 let photosMap={};/* blocId -> [{photoId, hasTrace}] */
 let currentBlocId=null;
-let selectedAura=null;/* cercle lumineux autour du bloc selectionne */
+let selectedBlocId=null;/* id du bloc avec l'aura */
 let currentPhotoId=null;
 let tracePoints=[];
 let drawing=false;
@@ -728,16 +728,19 @@ function refreshPhotoState(){
 /* === Popup bloc === */
 /* === Panneau bloc (split-screen : carte en haut, photo Boolder en bas) === */
 function openBlocPanel(id,lat,lon,props){
-  /* Retirer l'aura precedente */
-  if(selectedAura){ map.removeLayer(selectedAura); selectedAura=null; }
+  /* Retirer l'aura du bloc precedent */
+  if(selectedBlocId && blocMarkers[selectedBlocId]){
+    blocMarkers[selectedBlocId].setStyle({radius:8, weight:1.5});
+  }
   currentBlocId=id;
+  selectedBlocId=id;
   map.closePopup();
 
-  /* Aura autour du bloc selectionne */
-  selectedAura=L.circleMarker([lat,lon],{
-    radius:18, weight:3, color:'#3b82f6', fillColor:'#3b82f6',
-    fillOpacity:0.2, opacity:0.8, interactive:false
-  }).addTo(map);
+  /* Aura : agrandir le marqueur selectionne avec bordure bleue epaisse */
+  if(blocMarkers[id]){
+    blocMarkers[id].setStyle({radius:14, weight:4, color:'#3b82f6'});
+    blocMarkers[id].bringToFront();
+  }
 
   /* Remplir l'en-tete */
   document.getElementById('panel-name').textContent=props.name||'Bloc #'+id;
@@ -779,10 +782,11 @@ function openBlocPanel(id,lat,lon,props){
 
   panelEl.classList.add('active');
   document.getElementById('map').classList.add('half');
-  map.invalidateSize();
-
-  /* Centrer la carte sur le bloc selectionne */
-  setTimeout(()=>map.panTo([lat,lon]),100);
+  /* Attendre que le resize CSS soit applique, puis recalculer la carte et centrer */
+  setTimeout(()=>{
+    map.invalidateSize({animate:false});
+    map.panTo([lat,lon],{animate:true,duration:0.3});
+  },50);
 
   /* Priorite : photo perso (IndexedDB) > photo Boolder */
   if(photosMap[id]){
@@ -820,7 +824,11 @@ function closeBlocPanel(){
   document.getElementById('bloc-panel').classList.remove('active');
   document.getElementById('map').classList.remove('half');
   map.invalidateSize();
-  if(selectedAura){ map.removeLayer(selectedAura); selectedAura=null; }
+  /* Retirer l'aura du bloc */
+  if(selectedBlocId && blocMarkers[selectedBlocId]){
+    blocMarkers[selectedBlocId].setStyle({radius:8, weight:1.5, color:'#fff'});
+    selectedBlocId=null;
+  }
   currentBlocId=null;
 }
 
