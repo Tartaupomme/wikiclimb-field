@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wc-field-v17';
+const CACHE_NAME = 'wc-field-v18';
 
 // Fichiers essentiels mis en cache à l'installation
 const ASSETS = [
@@ -6,6 +6,7 @@ const ASSETS = [
   './index.html',
   './wc-blocs.geojson',
   './boolder-rochers.geojson',
+  './boolder-topos.json',
   './drone-missions.json',
   './boulder-groups.json',
   './photo-groups-wc.json',
@@ -45,6 +46,22 @@ self.addEventListener('fetch', e => {
 
   // Tuiles carte : network-first, puis cache en fallback
   if (TILE_HOSTS.some(h => url.hostname.includes(h))) {
+    e.respondWith(
+      fetch(e.request)
+        .then(resp => {
+          if (resp.ok) {
+            const clone = resp.clone();
+            caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+          }
+          return resp;
+        })
+        .catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // Photos topo Boolder : network-first, cache en fallback (pour le terrain hors-ligne)
+  if (url.hostname === 'assets.boolder.com') {
     e.respondWith(
       fetch(e.request)
         .then(resp => {
