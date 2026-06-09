@@ -443,7 +443,7 @@ async function loadData(){
       radius:8,weight:1.5,
       color:'#fff',fillColor:getBlocColor(id),fillOpacity:0.9
     });
-    marker.on('click',()=>handleBlocClick(id,lat,lon,p));
+    marker.on('click',(e)=>{L.DomEvent.stopPropagation(e);handleBlocClick(id,lat,lon,p)});
     blocMarkers[id]=marker;
     blocCluster.addLayer(marker);
   });
@@ -533,7 +533,7 @@ async function loadData(){
     const marker=L.circleMarker([tb.lat,tb.lon],{
       radius:8,weight:1.5,color:'#fff',fillColor:getBlocColor(tb.id),fillOpacity:0.9
     });
-    marker.on('click',()=>handleBlocClick(tb.id,tb.lat,tb.lon,tb));
+    marker.on('click',(e)=>{L.DomEvent.stopPropagation(e);handleBlocClick(tb.id,tb.lat,tb.lon,tb)});
     blocMarkers[tb.id]=marker;
     blocCluster.addLayer(marker);
   });
