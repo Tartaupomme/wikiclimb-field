@@ -21,16 +21,18 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 /* Panneau photo Boolder (moitie basse) */
 #bloc-panel { display:none; position:fixed; bottom:0; left:0; right:0; height:50vh; background:#111; z-index:900; flex-direction:column; }
 #bloc-panel.active { display:flex; }
-#bloc-panel .panel-header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#1a1a1a; border-top:2px solid #333; flex-shrink:0; }
-#bloc-panel .panel-header h3 { margin:0; font-size:14px; color:#fff; }
-#bloc-panel .panel-header .grade-badge { background:#f97316; color:#fff; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:bold; margin-left:8px; }
-#bloc-panel .panel-header .close-btn { background:none; border:none; color:#999; font-size:22px; cursor:pointer; padding:0 6px; }
+/* Barre unique : icones actions | nom tronque | cotation | fermer */
+#bloc-panel .panel-bar { display:flex; align-items:center; gap:6px; padding:6px 10px; background:#1a1a1a; border-top:2px solid #333; flex-shrink:0; }
+#bloc-panel .panel-bar .actions { display:flex; gap:4px; flex-shrink:0; }
+#bloc-panel .panel-bar .icon-btn { width:34px; height:34px; border:none; border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+#bloc-panel .panel-bar .bloc-info { flex:1; min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; }
+#bloc-panel .panel-bar .bloc-info h3 { margin:0; font-size:13px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#bloc-panel .panel-bar .grade-badge { background:#f97316; color:#fff; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:bold; flex-shrink:0; }
+#bloc-panel .panel-bar .close-btn { background:none; border:none; color:#999; font-size:22px; cursor:pointer; padding:0 4px; flex-shrink:0; }
 #bloc-panel .panel-body { flex:1; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#000; position:relative; }
 #bloc-panel .panel-body img { max-width:100%; max-height:100%; object-fit:contain; }
 #bloc-panel .panel-body .loading { color:#666; font-size:14px; }
 #bloc-panel .panel-body .no-photo { color:#666; font-size:13px; text-align:center; padding:20px; }
-#bloc-panel .panel-actions { display:flex; gap:6px; padding:6px 12px; background:#1a1a1a; flex-shrink:0; }
-#bloc-panel .panel-actions .btn { flex:1; padding:10px; border:none; border-radius:6px; font-size:13px; font-weight:bold; cursor:pointer; text-align:center; }
 
 /* Popup bloc */
 .bloc-popup { min-width:200px; }
@@ -119,23 +121,25 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 
 <!-- Panneau photo Boolder (moitie basse de l'ecran) -->
 <div id="bloc-panel">
-  <div class="panel-header">
-    <div style="display:flex;align-items:center;overflow:hidden">
-      <h3 id="panel-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></h3>
+  <div class="panel-bar">
+    <!-- Boutons icones compacts -->
+    <div class="actions">
+      <button class="icon-btn" id="panel-btn-photo" style="background:#3b82f6;color:#fff" title="Prendre une photo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+      <button class="icon-btn" id="panel-btn-gallery" style="background:#6b7280;color:#fff" title="Choisir depuis la galerie"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>
+      <button class="icon-btn" id="panel-btn-view" style="background:#22c55e;color:#fff;display:none" title="Voir / Lier blocs"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+      <a class="icon-btn" id="panel-btn-boolder" href="#" target="_blank" rel="noopener" style="background:#464E2E;color:#fff;display:none;text-decoration:none" title="Voir sur Boolder"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+    </div>
+    <!-- Nom + cotation -->
+    <div class="bloc-info">
+      <h3 id="panel-name"></h3>
       <span id="panel-grade" class="grade-badge"></span>
     </div>
     <button class="close-btn" onclick="closeBlocPanel()">&times;</button>
   </div>
-  <div class="panel-body" id="panel-body" onclick="closeBlocPanel()">
+  <div class="panel-body" id="panel-body">
     <span class="loading" id="panel-loading">Chargement...</span>
     <img id="panel-img" style="display:none">
     <div class="no-photo" id="panel-no-photo" style="display:none">Pas de photo Boolder</div>
-  </div>
-  <div class="panel-actions">
-    <button class="btn bloc-btn-photo" id="panel-btn-photo">Photo</button>
-    <button class="btn bloc-btn-gallery" id="panel-btn-gallery">Galerie</button>
-    <button class="btn bloc-btn-done" id="panel-btn-view" style="display:none">Voir / Lier</button>
-    <a id="panel-btn-boolder" href="#" target="_blank" rel="noopener" class="btn" style="background:#6b7280;color:#fff;text-decoration:none;display:none">Boolder</a>
   </div>
 </div>
 
