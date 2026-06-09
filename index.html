@@ -22,9 +22,10 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 .bloc-popup .grade { display:inline-block; background:#f97316; color:#fff; padding:1px 8px; border-radius:10px; font-size:13px; font-weight:bold; }
 .bloc-popup .circuit { font-size:12px; color:#888; margin-top:2px; }
 .bloc-popup img { width:100%; border-radius:6px; margin:6px 0; }
-.bloc-popup .actions { display:flex; gap:6px; margin-top:6px; }
+.bloc-popup .actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
 .bloc-popup .btn { flex:1; padding:8px; border:none; border-radius:6px; font-size:13px; font-weight:bold; cursor:pointer; text-align:center; }
 .bloc-btn-photo { background:#3b82f6; color:#fff; }
+.bloc-btn-gallery { background:#6b7280; color:#fff; }
 .bloc-btn-done { background:#22c55e; color:#fff; }
 
 /* Status bar */
@@ -63,7 +64,7 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 #grade-slider input[type=range]::-moz-range-track { background:none; }
 
 /* Hidden file input */
-#camera-input { display:none; }
+#camera-input, #gallery-input { display:none; }
 </style>
 </head>
 <body>
@@ -100,8 +101,9 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
   </div>
 </div>
 
-<!-- Input camera cache -->
+<!-- Inputs natifs caches : camera (capture direct) et galerie (choisir un fichier) -->
 <input type="file" id="camera-input" accept="image/*" capture="environment">
+<input type="file" id="gallery-input" accept="image/*">
 
 <!-- Modal trace sur photo -->
 <div id="photo-modal">
@@ -182,6 +184,59 @@ function deletePhoto(id){
     const store=tx.objectStore('photos');
     const req=store.delete(id);
     req.onsuccess=()=>resolve();
+    req.onerror=e=>reject(e);
+  });
+}
+function getPhoto(id){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readonly');
+    const req=tx.objectStore('photos').get(id);
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=e=>reject(e);
+  });
+}
+/* Compteurs via curseur : pic mémoire = 1 enregistrement (jamais toutes les images
+   en RAM d'un coup, contrairement à getAll()). */
+function getPhotoCounts(){
+  return new Promise((resolve,reject)=>{
+    let total=0,unsynced=0;
+    const tx=db.transaction('photos','readonly');
+    const req=tx.objectStore('photos').openCursor();
+    req.onsuccess=e=>{
+      const c=e.target.result;
+      if(c){ total++; if(!c.value.synced){ unsynced++; } c.continue(); }
+      else resolve({total,unsynced});
+    };
+    req.onerror=e=>reject(e);
+  });
+}
+/* IDs des photos à envoyer (non synchronisées et possédant encore leur image). */
+function getUnsyncedIds(){
+  return new Promise((resolve,reject)=>{
+    const ids=[];
+    const tx=db.transaction('photos','readonly');
+    const req=tx.objectStore('photos').openCursor();
+    req.onsuccess=e=>{
+      const c=e.target.result;
+      if(c){ if(!c.value.synced && c.value.image){ ids.push(c.value.id); } c.continue(); }
+      else resolve(ids);
+    };
+    req.onerror=e=>reject(e);
+  });
+}
+/* Nettoyage : libère l'image des photos déjà synchronisées qui la gardaient encore
+   (héritage d'avant le sync auto). Ne touche jamais aux photos non envoyées. */
+function freeSyncedImages(){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readwrite');
+    const req=tx.objectStore('photos').openCursor();
+    req.onsuccess=e=>{
+      const c=e.target.result;
+      if(c){
+        if(c.value.synced && c.value.image){ const v=c.value; delete v.image; c.update(v); }
+        c.continue();
+      }else resolve();
+    };
     req.onerror=e=>reject(e);
   });
 }
@@ -587,17 +642,29 @@ function updateBlocColor(id){
   }
 }
 
-async function refreshPhotoState(){
-  const photos=await getAllPhotos();
-  photosMap={};
-  photos.forEach(p=>{
-    (p.blocIds||[]).forEach(bid=>{
-      if(!photosMap[bid])photosMap[bid]=[];
-      photosMap[bid].push({photoId:p.id,hasTrace:!!p.trace});
-    });
+function refreshPhotoState(){
+  /* Curseur : on lit blocIds/trace une photo à la fois, sans charger toutes les
+     images base64 en mémoire (cf. crash progressif). */
+  return new Promise((resolve,reject)=>{
+    photosMap={};
+    const tx=db.transaction('photos','readonly');
+    const req=tx.objectStore('photos').openCursor();
+    req.onsuccess=e=>{
+      const c=e.target.result;
+      if(c){
+        const p=c.value;
+        (p.blocIds||[]).forEach(bid=>{
+          if(!photosMap[bid])photosMap[bid]=[];
+          photosMap[bid].push({photoId:p.id,hasTrace:!!p.trace});
+        });
+        c.continue();
+      }else{
+        Object.keys(blocMarkers).forEach(id=>updateBlocColor(id));
+        resolve();
+      }
+    };
+    req.onerror=e=>reject(e);
   });
-  /* Mettre a jour les couleurs */
-  Object.keys(blocMarkers).forEach(id=>updateBlocColor(id));
 }
 
 /* === Popup bloc === */
@@ -620,6 +687,15 @@ function openBlocPopup(id,lat,lon,props){
       req.onsuccess=()=>{
         if(!req.result)return;
         const el=document.getElementById('popup-photo-'+id);
+        if(!req.result.image){
+          /* Image libérée après synchronisation : elle est sur le serveur. */
+          const wrap=document.getElementById('popup-photo-wrap-'+id);
+          if(wrap){
+            wrap.onclick=null; wrap.style.cursor='default';
+            wrap.innerHTML='<div style="padding:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px;color:#16a34a;text-align:center">&#10003; Photo synchronisée<br><span style="color:#666">(stockée sur le serveur)</span></div>';
+          }
+          return;
+        }
         if(el)el.src=req.result.image;
         /* Dessiner les traces */
         const svgEl=document.getElementById('popup-svg-'+id);
@@ -649,6 +725,7 @@ function openBlocPopup(id,lat,lon,props){
     ${!photosMap[id]&&boolderUrl?'<a href="'+boolderUrl+'" target="_blank" style="display:block;margin:6px 0;color:#3b82f6;font-size:12px">Voir sur Boolder</a>':''}
     <div class="actions">
       <button class="btn bloc-btn-photo" onclick="takePhoto('${id}')">${photosMap[id]?'Nouvelle photo':'Photo'}</button>
+      <button class="btn bloc-btn-gallery" onclick="chooseFromGallery('${id}')">Galerie</button>
       ${photosMap[id]?'<button class="btn bloc-btn-done" onclick="openPhotoView(\''+id+'\')">Voir / Lier</button>':''}
     </div>
   </div>`;
@@ -656,17 +733,21 @@ function openBlocPopup(id,lat,lon,props){
   L.popup({maxWidth:280}).setLatLng([lat,lon]).setContent(html).openOn(map);
 }
 
-/* === Prise de photo === */
-function takePhoto(blocId){
+/* === Prise / choix de photo ===
+   Deux inputs natifs : #camera-input (capture="environment" → caméra directe)
+   et #gallery-input (sans capture → sélecteur de fichier / galerie). */
+function pickPhoto(blocId,inputId){
   currentBlocId=blocId;
   /* Filet de sécurité : sur mobile l'état JS peut être réinitialisé au retour de
      l'appareil photo natif. On persiste l'id pour le relire en fallback (cf. change). */
   try{ localStorage.setItem('wc-pending-bloc',blocId); }catch(e){}
-  document.getElementById('camera-input').click();
+  document.getElementById(inputId).click();
 }
+function takePhoto(blocId){ pickPhoto(blocId,'camera-input'); }
+function chooseFromGallery(blocId){ pickPhoto(blocId,'gallery-input'); }
 
-/* === Prise de photo → sauvegarde directe === */
-document.getElementById('camera-input').addEventListener('change',async function(e){
+/* Sélection d'un fichier (caméra ou galerie) → sauvegarde directe */
+async function onPhotoSelected(e){
   const file=e.target.files[0];
   if(!file)return;
 
@@ -706,7 +787,9 @@ document.getElementById('camera-input').addEventListener('change',async function
   };
   reader.readAsDataURL(file);
   e.target.value='';
-});
+}
+document.getElementById('camera-input').addEventListener('change',onPhotoSelected);
+document.getElementById('gallery-input').addEventListener('change',onPhotoSelected);
 
 /* === Mode photo (association blocs) === */
 const CHIP_COLORS=['#f97316','#3b82f6','#22c55e','#a855f7','#ec4899','#eab308','#06b6d4','#ef4444'];
@@ -728,7 +811,9 @@ function openPhotoModal(photoData){
   currentPhotoData=photoData;
   currentPhotoId=photoData.id;
   linkMode=false;
-  document.getElementById('photo-img').src=photoData.image;
+  const imgEl=document.getElementById('photo-img');
+  if(photoData.image){ imgEl.src=photoData.image; imgEl.style.display=''; }
+  else { imgEl.removeAttribute('src'); imgEl.style.display='none'; }/* image sur le serveur */
   document.getElementById('photo-modal').classList.add('active');
   map.closePopup();
   renderBlocChips();
@@ -742,6 +827,7 @@ function closePhotoModal(){
 
 function saveAndClose(){
   closePhotoModal();
+  autoSync(true);/* l'utilisateur a fini de lier : on tente d'envoyer en arrière-plan */
 }
 
 /* Chips des blocs lies a la photo */
@@ -816,59 +902,66 @@ function catmullRomToSVG(points){
 const SYNC_URL='https://wiki-climb.com/api/field/photos';
 const FIELD_TOKEN='ce8b9a228b00c5a0d177af8b758d9a2a16cd14f517104fcaaa3c41519c709b2e';
 
-async function syncPhotos(){
-  const photos=await getAllPhotos();
-  const unsynced=photos.filter(p=>!p.synced);
-  if(!unsynced.length){
-    alert('Tout est synchronisé !');
-    return;
-  }
+let syncing=false;
 
-  if(!confirm(unsynced.length+' photo(s) à envoyer vers wiki-climb.com.\nContinuer ?'))return;
+/* Envoie une photo au serveur. Renvoie son serverId, ou lève en cas d'échec. */
+async function uploadPhoto(p){
+  const blob=await(await fetch(p.image)).blob();
+  const fd=new FormData();
+  fd.append('photo',blob,'field-photo.jpg');
+  fd.append('blocIds',JSON.stringify(p.blocIds||[]));
+  if(p.latitude)fd.append('latitude',String(p.latitude));
+  if(p.longitude)fd.append('longitude',String(p.longitude));
+  const res=await fetch(SYNC_URL,{method:'POST',body:fd,headers:{'X-Field-Token':FIELD_TOKEN}});
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  return (await res.json()).id;
+}
 
+/* Envoie les photos non synchronisées, une à la fois (mémoire bornée), puis LIBÈRE
+   l'image localement (l'image est sur le serveur ; on garde la métadonnée pour que
+   le bloc reste vert). En mode silent (auto) : pas d'alerte, s'arrête si réseau coupé. */
+async function autoSync(silent){
+  if(syncing) return;
+  /* En auto, on attend que le modal photo soit fermé (liaison de blocs en cours). */
+  if(silent && document.getElementById('photo-modal').classList.contains('active')) return;
+  if(!navigator.onLine){ if(!silent){ alert('Hors ligne — réessaie quand tu auras du réseau.'); } return; }
+  const ids=await getUnsyncedIds();
+  if(!ids.length){ if(!silent){ alert('Tout est synchronisé !'); } return; }
+
+  syncing=true;
   const statusEl=document.getElementById('status-text');
   let success=0,errors=0;
 
-  for(let i=0;i<unsynced.length;i++){
-    statusEl.textContent=`Sync ${i+1}/${unsynced.length}...`;
+  for(let i=0;i<ids.length;i++){
+    if(!navigator.onLine) break;/* réseau perdu : on reprendra plus tard */
+    const p=await getPhoto(ids[i]);
+    if(!p||!p.image){ continue; }
+    statusEl.textContent=`Sync ${i+1}/${ids.length}...`;
     try{
-      /* Convertir le base64 en blob */
-      const resp=await fetch(unsynced[i].image);
-      const blob=await resp.blob();
-
-      /* Construire le FormData */
-      const fd=new FormData();
-      fd.append('photo',blob,'field-photo.jpg');
-      fd.append('blocIds',JSON.stringify(unsynced[i].blocIds||[]));
-      if(unsynced[i].latitude)fd.append('latitude',String(unsynced[i].latitude));
-      if(unsynced[i].longitude)fd.append('longitude',String(unsynced[i].longitude));
-
-      /* Envoyer au serveur avec le token d'auth */
-      const res=await fetch(SYNC_URL,{
-        method:'POST',
-        body:fd,
-        headers:{'X-Field-Token':FIELD_TOKEN}
-      });
-      if(res.ok){
-        unsynced[i].synced=true;
-        unsynced[i].serverId=(await res.json()).id;
-        await updatePhoto(unsynced[i]);
-        success++;
-      }else{
-        const err=await res.json().catch(()=>({error:'Erreur'}));
-        console.error('Sync erreur:',err);
-        errors++;
-      }
+      const serverId=await uploadPhoto(p);
+      p.synced=true;
+      p.serverId=serverId;
+      delete p.image;/* libère le stockage : l'image vit désormais sur le serveur */
+      await updatePhoto(p);
+      success++;
     }catch(e){
-      console.error('Sync erreur réseau:',e);
+      console.error('Sync erreur:',e);
       errors++;
+      if(!navigator.onLine) break;
     }
   }
 
-  updateStatus();
-  if(errors)alert(success+' photo(s) envoyées, '+errors+' erreur(s)');
-  else alert(success+' photo(s) envoyées sur wiki-climb.com !');
+  syncing=false;
+  await refreshPhotoState();
+  await updateStatus();
+  if(!silent){
+    if(errors)alert(success+' photo(s) envoyées, '+errors+' erreur(s)');
+    else alert(success+' photo(s) envoyées sur wiki-climb.com !');
+  }
 }
+
+/* Bouton manuel "Sync" */
+function syncPhotos(){ autoSync(false); }
 
 /* Liberer l'espace : supprimer les photos syncees du telephone */
 async function cleanSynced(){
@@ -937,9 +1030,7 @@ async function clearAllPhotos(){
 
 /* === Status bar === */
 async function updateStatus(){
-  const photos=await getAllPhotos();
-  const total=photos.length;
-  const unsynced=photos.filter(p=>!p.synced).length;
+  const {total,unsynced}=await getPhotoCounts();
 
   let text='Prêt';
   if(total>0){
@@ -951,7 +1042,14 @@ async function updateStatus(){
 }
 
 /* === Init === */
-openDB().then(()=>loadData());
+openDB().then(()=>loadData()).then(()=>{
+  /* Sync auto : au démarrage (reliquat de la session précédente), au retour du réseau,
+     et toutes les 3 min en tâche de fond. Une image est libérée du téléphone dès
+     qu'elle est sur le serveur. */
+  freeSyncedImages().then(()=>autoSync(true));
+  window.addEventListener('online',()=>autoSync(true));
+  setInterval(()=>autoSync(true),3*60*1000);
+});
 </script>
 </body>
 </html>
