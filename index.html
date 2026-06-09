@@ -48,6 +48,20 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 #map-toggles button.active { background:#464E2E; color:#fff; border-color:#464E2E; }
 #map-toggles button .dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
 
+/* Panneau filtre cotation */
+#grade-panel { display:none; background:#fff; border:2px solid rgba(0,0,0,.2); border-radius:4px; padding:10px 12px; box-shadow:0 1px 5px rgba(0,0,0,.3); color:#333; width:200px; }
+#grade-panel.open { display:block; }
+#grade-panel .label { font-size:13px; font-weight:700; text-align:center; margin-bottom:8px; }
+#grade-panel .label span { color:#f97316; }
+/* Slider double : deux range superposés sur une piste commune */
+#grade-slider { position:relative; height:28px; }
+#grade-slider .track { position:absolute; top:12px; left:0; right:0; height:4px; background:#ddd; border-radius:2px; }
+#grade-slider .track .fill { position:absolute; top:0; bottom:0; background:#f97316; border-radius:2px; }
+#grade-slider input[type=range] { position:absolute; top:0; left:0; width:100%; height:28px; margin:0; background:none; pointer-events:none; -webkit-appearance:none; appearance:none; }
+#grade-slider input[type=range]::-webkit-slider-thumb { pointer-events:auto; -webkit-appearance:none; appearance:none; width:18px; height:18px; border-radius:50%; background:#f97316; border:2px solid #fff; box-shadow:0 1px 3px rgba(0,0,0,.4); cursor:pointer; }
+#grade-slider input[type=range]::-moz-range-thumb { pointer-events:auto; width:18px; height:18px; border-radius:50%; background:#f97316; border:2px solid #fff; box-shadow:0 1px 3px rgba(0,0,0,.4); cursor:pointer; }
+#grade-slider input[type=range]::-moz-range-track { background:none; }
+
 /* Hidden file input */
 #camera-input { display:none; }
 </style>
@@ -64,6 +78,17 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
   <button id="toggle-parkings" class="active" onclick="toggleParkings()">
     <span class="dot" style="background:#3b82f6"></span> Parkings
   </button>
+  <button id="toggle-grade" onclick="toggleGradePanel()">
+    <span class="dot" style="background:#f97316"></span> Cotation
+  </button>
+  <div id="grade-panel">
+    <div class="label"><span id="grade-min-lbl">1</span> &rarr; <span id="grade-max-lbl">9a</span></div>
+    <div id="grade-slider">
+      <div class="track"><div class="fill" id="grade-fill"></div></div>
+      <input type="range" id="grade-lo" min="0" value="0">
+      <input type="range" id="grade-hi" min="0" value="0">
+    </div>
+  </div>
 </div>
 
 <div id="status-bar">
@@ -164,6 +189,7 @@ function deletePhoto(id){
 /* === Etat global === */
 let blocsData=null,rochersData=null,droneData=null,boulderGroups=null;
 let photoGroupMap={};/* wcId -> [wcId, ...] — blocs sur la même photo */
+let boolderPhotoIds=new Set();/* wcId des blocs ayant une photo topo sur Boolder */
 let blocMarkers={};/* id -> L.circleMarker */
 let blocCluster=null;/* MarkerClusterGroup des blocs */
 let rochersLayer=null;/* GeoJSON des contours de rochers */
@@ -335,9 +361,10 @@ async function loadData(){
 
   photoGroupsR.forEach((group,gi)=>{
     const color=GROUP_COLORS[gi%GROUP_COLORS.length];
-    /* Construire le lookup : chaque bloc → ses siblings */
+    /* Construire le lookup : chaque bloc → ses siblings + marquer "photo Boolder" */
     group.forEach(bid=>{
       photoGroupMap[bid]=group.filter(id=>id!==bid);
+      boolderPhotoIds.add(bid);
     });
     group.forEach(bid=>{
       const coords=blocCoords[bid];
@@ -422,6 +449,10 @@ async function loadData(){
   });
   parkingLayer.addTo(map);
 
+  /* Index cotation + slider de filtre (après que tous les blocs, test inclus, soient chargés) */
+  buildGradeIndex();
+  initGradeSlider();
+
   /* Charger les photos existantes depuis IndexedDB */
   await refreshPhotoState();
   updateStatus();
@@ -454,9 +485,77 @@ function toggleParkings(){
   }
 }
 
+/* === Filtre cotation === */
+const GRADES=['1','2','3a','3b','3c','4a','4b','4c','5a','5b','5c','6a','6a+','6b','6b+','6c','6c+','7a','7a+','7b','7b+','7c','7c+','8a','8a+','8b','8b+','8c','8c+','9a'];
+let blocGradeIdx={};        /* id -> index dans GRADES (-1 si inconnu) */
+let gradeFilterMin=0;
+let gradeFilterMax=GRADES.length-1;
+
+/* Normalise une cotation ("7B+ " -> "7b+") et renvoie son index, -1 si non reconnue */
+function gradeToIndex(g){
+  if(!g)return -1;
+  const norm=String(g).toLowerCase().replace(/\s/g,'');
+  return GRADES.indexOf(norm);
+}
+
+/* Construit l'index cotation pour tous les blocs chargés */
+function buildGradeIndex(){
+  blocsData.features.forEach(f=>{
+    blocGradeIdx[f.properties.id]=gradeToIndex(f.properties.grade);
+  });
+}
+
+/* Applique le filtre courant : reconstruit le cluster avec les blocs dans la fourchette */
+function applyGradeFilter(){
+  if(!blocCluster)return;
+  const full=(gradeFilterMin===0 && gradeFilterMax===GRADES.length-1);
+  const subset=[];
+  Object.keys(blocMarkers).forEach(id=>{
+    const idx=blocGradeIdx[id];
+    let keep;
+    if(idx<0) keep=full;                                  /* sans cotation : visible seulement si fourchette complète */
+    else keep=(idx>=gradeFilterMin && idx<=gradeFilterMax);
+    if(keep) subset.push(blocMarkers[id]);
+  });
+  blocCluster.clearLayers();
+  blocCluster.addLayers(subset);
+}
+
+/* Initialise le slider double une fois les données chargées */
+function initGradeSlider(){
+  const lo=document.getElementById('grade-lo');
+  const hi=document.getElementById('grade-hi');
+  const max=GRADES.length-1;
+  lo.max=max; hi.max=max;
+  lo.value=0; hi.value=max;
+  gradeFilterMin=0; gradeFilterMax=max;
+
+  function refresh(){
+    let a=parseInt(lo.value,10), b=parseInt(hi.value,10);
+    if(a>b){ const t=a; a=b; b=t; }                       /* poignées croisées : on borne sans bloquer */
+    gradeFilterMin=a; gradeFilterMax=b;
+    document.getElementById('grade-min-lbl').textContent=GRADES[a];
+    document.getElementById('grade-max-lbl').textContent=GRADES[b];
+    const fill=document.getElementById('grade-fill');
+    fill.style.left=(a/max*100)+'%';
+    fill.style.right=((max-b)/max*100)+'%';
+    /* bouton actif si la fourchette est resserrée */
+    document.getElementById('toggle-grade').classList.toggle('active',!(a===0&&b===max));
+    applyGradeFilter();
+  }
+  lo.addEventListener('input',refresh);
+  hi.addEventListener('input',refresh);
+  refresh();
+}
+
+function toggleGradePanel(){
+  document.getElementById('grade-panel').classList.toggle('open');
+}
+
 function getBlocColor(id){
-  if(photosMap[id]) return '#22c55e';/* photo prise = vert */
-  return '#ef4444';/* pas de photo = rouge */
+  if(photosMap[id]) return '#22c55e';/* photo prise (→ WikiClimb) = vert */
+  if(boolderPhotoIds.has(id)) return '#f97316';/* photo topo sur Boolder = orange */
+  return '#ef4444';/* aucune photo (ni Boolder ni WikiClimb) = rouge */
 }
 
 function updateBlocColor(id){
