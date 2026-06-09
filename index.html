@@ -295,6 +295,7 @@ let blocsVisible=true;
 let parkingsVisible=true;
 let photosMap={};/* blocId -> [{photoId, hasTrace}] */
 let currentBlocId=null;
+let selectedAura=null;/* cercle lumineux autour du bloc selectionne */
 let currentPhotoId=null;
 let tracePoints=[];
 let drawing=false;
@@ -727,8 +728,16 @@ function refreshPhotoState(){
 /* === Popup bloc === */
 /* === Panneau bloc (split-screen : carte en haut, photo Boolder en bas) === */
 function openBlocPanel(id,lat,lon,props){
+  /* Retirer l'aura precedente */
+  if(selectedAura){ map.removeLayer(selectedAura); selectedAura=null; }
   currentBlocId=id;
   map.closePopup();
+
+  /* Aura autour du bloc selectionne */
+  selectedAura=L.circleMarker([lat,lon],{
+    radius:18, weight:3, color:'#3b82f6', fillColor:'#3b82f6',
+    fillOpacity:0.2, opacity:0.8, interactive:false
+  }).addTo(map);
 
   /* Remplir l'en-tete */
   document.getElementById('panel-name').textContent=props.name||'Bloc #'+id;
@@ -811,6 +820,7 @@ function closeBlocPanel(){
   document.getElementById('bloc-panel').classList.remove('active');
   document.getElementById('map').classList.remove('half');
   map.invalidateSize();
+  if(selectedAura){ map.removeLayer(selectedAura); selectedAura=null; }
   currentBlocId=null;
 }
 
