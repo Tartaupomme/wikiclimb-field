@@ -359,6 +359,11 @@ async function loadData(){
   /* Charger les groupes photo (blocs partageant la même photo Boolder) */
   const photoGroupsR=await fetch('photo-groups-wc.json').then(r=>r.json());
 
+  /* On NE crée PAS les ~6600 halos d'un coup : on stocke leur définition et on ne
+     rend que ceux visibles dans la fenêtre (cf. renderHalos). Rendre 6600 circleMarkers
+     d'un coup au zoom 17 provoquait un pic mémoire ; pendant l'appareil photo natif la
+     webview mobile était alors tuée par l'OS et la photo en cours était perdue. */
+  const haloDefs=[];/* {lat, lon, color} */
   photoGroupsR.forEach((group,gi)=>{
     const color=GROUP_COLORS[gi%GROUP_COLORS.length];
     /* Construire le lookup : chaque bloc → ses siblings + marquer "photo Boolder" */
@@ -368,21 +373,39 @@ async function loadData(){
     });
     group.forEach(bid=>{
       const coords=blocCoords[bid];
-      if(!coords) return;
-      L.circleMarker(coords,{
-        radius:10, weight:2.5, color:color,
-        fill:false, opacity:0.7, interactive:false
-      }).addTo(groupLayer);
+      if(coords) haloDefs.push({lat:coords[0],lon:coords[1],color});
     });
   });
 
-  /* Afficher les halos seulement quand on est assez zoomé (>= 17) */
-  function updateGroupVisibility(){
-    if(map.getZoom()>=17) { if(!map.hasLayer(groupLayer)) map.addLayer(groupLayer); }
-    else { if(map.hasLayer(groupLayer)) map.removeLayer(groupLayer); }
+  /* Rend uniquement les halos de la fenêtre courante, et seulement au zoom >= 17.
+     On garde une trace des bornes déjà rendues pour ne pas reconstruire à chaque
+     micro-déplacement GPS (panTo continu). */
+  let haloRenderedBounds=null;
+  function renderHalos(){
+    if(map.getZoom()<17){
+      if(map.hasLayer(groupLayer)) map.removeLayer(groupLayer);
+      groupLayer.clearLayers();
+      haloRenderedBounds=null;
+      return;
+    }
+    const view=map.getBounds();
+    if(haloRenderedBounds && haloRenderedBounds.contains(view)) return;/* déjà couvert */
+    const b=view.pad(0.5);
+    groupLayer.clearLayers();
+    haloDefs.forEach(h=>{
+      if(b.contains([h.lat,h.lon])){
+        groupLayer.addLayer(L.circleMarker([h.lat,h.lon],{
+          radius:10, weight:2.5, color:h.color,
+          fill:false, opacity:0.7, interactive:false
+        }));
+      }
+    });
+    haloRenderedBounds=b;
+    if(!map.hasLayer(groupLayer)) map.addLayer(groupLayer);
   }
-  map.on('zoomend',updateGroupVisibility);
-  updateGroupVisibility();
+  map.on('zoomend',renderHalos);
+  map.on('moveend',renderHalos);
+  renderHalos();
 
   /* === BLOCS DE TEST — rue Helena Fournier, Tours === */
   const TEST_BLOCS=[
@@ -636,6 +659,9 @@ function openBlocPopup(id,lat,lon,props){
 /* === Prise de photo === */
 function takePhoto(blocId){
   currentBlocId=blocId;
+  /* Filet de sécurité : sur mobile l'état JS peut être réinitialisé au retour de
+     l'appareil photo natif. On persiste l'id pour le relire en fallback (cf. change). */
+  try{ localStorage.setItem('wc-pending-bloc',blocId); }catch(e){}
   document.getElementById('camera-input').click();
 }
 
@@ -646,9 +672,16 @@ document.getElementById('camera-input').addEventListener('change',async function
 
   const reader=new FileReader();
   reader.onload=async function(){
+    /* Bloc cible : global, avec fallback localStorage si l'état JS a été réinitialisé
+       (retour d'appareil photo sur mobile). On refuse de sauver une photo orpheline. */
+    let blocId=currentBlocId;
+    if(!blocId){ try{ blocId=localStorage.getItem('wc-pending-bloc')||null; }catch(e){ blocId=null; } }
+    if(!blocId){ alert('Bloc cible perdu — reprends la photo.'); return; }
+    currentBlocId=blocId;
+
     /* Lier automatiquement les blocs du meme rocher */
-    const linkedIds=[currentBlocId];
-    const siblings=photoGroupMap[currentBlocId]||null;
+    const linkedIds=[blocId];
+    const siblings=photoGroupMap[blocId]||null;
     if(siblings){siblings.forEach(sid=>{if(!linkedIds.includes(sid))linkedIds.push(sid)})}
 
     const photoData={
@@ -660,6 +693,7 @@ document.getElementById('camera-input').addEventListener('change',async function
       synced:false
     };
     const photoId=await addPhoto(photoData);
+    try{ localStorage.removeItem('wc-pending-bloc'); }catch(e){ /* ignore */ }
     await refreshPhotoState();
     updateStatus();
     map.closePopup();
