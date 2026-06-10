@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wc-field-v24';
+const CACHE_NAME = 'wc-field-v25';
 
 // Fichiers essentiels mis en cache à l'installation
 const ASSETS = [

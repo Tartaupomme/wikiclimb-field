@@ -810,7 +810,11 @@ function openBlocPanel(id,lat,lon,props){
     const topoId=boolderId && topoLookup ? topoLookup[boolderId] : null;
     if(topoId){
       const topoUrl='https://assets.boolder.com/proxy/topos/'+topoId;
-      imgEl.onload=()=>{ loadingEl.style.display='none'; imgEl.style.display=''; };
+      imgEl.onload=()=>{
+        /* Boolder peut retourner 200 avec Content-Length:0 (photo vide) */
+        if(imgEl.naturalWidth===0){loadingEl.style.display='none';noPhotoEl.style.display='';return;}
+        loadingEl.style.display='none'; imgEl.style.display='';
+      };
       imgEl.onerror=()=>{ loadingEl.style.display='none'; noPhotoEl.style.display=''; };
       imgEl.src=topoUrl;
     }else{
