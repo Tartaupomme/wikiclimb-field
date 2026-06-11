@@ -12,9 +12,27 @@
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
-#map { height:100vh; width:100%; }
+#map { height:100vh; width:100%; transition:height 0.2s ease; }
+#map.half { height:50vh; }
 /* Remonter les contrôles Leaflet au-dessus de la status bar (36px) */
 .leaflet-bottom { bottom:44px !important; }
+#map.half .leaflet-bottom { bottom:0 !important; }
+
+/* Panneau photo Boolder (moitie basse) */
+#bloc-panel { display:none; position:fixed; bottom:0; left:0; right:0; height:50vh; background:#111; z-index:900; flex-direction:column; }
+#bloc-panel.active { display:flex; }
+/* Barre unique : icones actions | nom tronque | cotation | fermer */
+#bloc-panel .panel-bar { display:flex; align-items:center; gap:6px; padding:6px 10px; background:#1a1a1a; border-top:2px solid #333; flex-shrink:0; }
+#bloc-panel .panel-bar .actions { display:flex; gap:4px; flex-shrink:0; }
+#bloc-panel .panel-bar .icon-btn { width:34px; height:34px; border:none; border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+#bloc-panel .panel-bar .bloc-info { flex:1; min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; }
+#bloc-panel .panel-bar .bloc-info h3 { margin:0; font-size:13px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#bloc-panel .panel-bar .grade-badge { background:#f97316; color:#fff; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:bold; flex-shrink:0; }
+#bloc-panel .panel-bar .close-btn { background:none; border:none; color:#999; font-size:22px; cursor:pointer; padding:0 4px; flex-shrink:0; }
+#bloc-panel .panel-body { flex:1; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#000; position:relative; }
+#bloc-panel .panel-body img { max-width:100%; max-height:100%; object-fit:contain; }
+#bloc-panel .panel-body .loading { color:#666; font-size:14px; }
+#bloc-panel .panel-body .no-photo { color:#666; font-size:13px; text-align:center; padding:20px; }
 
 /* Popup bloc */
 .bloc-popup { min-width:200px; }
@@ -43,14 +61,14 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 #photo-canvas-wrap img { max-width:100%; max-height:100%; display:block; }
 #trace-svg { position:absolute; pointer-events:auto; }
 
-/* Toggle controls en haut a gauche */
-#map-toggles { position:fixed; top:10px; left:10px; z-index:800; display:flex; flex-direction:column; gap:4px; }
-#map-toggles button { display:flex; align-items:center; gap:6px; padding:6px 10px; background:#fff; border:2px solid rgba(0,0,0,.2); border-radius:4px; font-size:12px; font-weight:600; cursor:pointer; box-shadow:0 1px 5px rgba(0,0,0,.3); color:#333; white-space:nowrap; }
+/* Toggle controls en haut a gauche — ligne horizontale d'icones */
+#map-toggles { position:fixed; top:10px; left:10px; z-index:800; display:flex; flex-direction:row; gap:4px; align-items:flex-start; }
+#map-toggles button { display:flex; align-items:center; justify-content:center; width:34px; height:34px; padding:0; background:#fff; border:2px solid rgba(0,0,0,.2); border-radius:6px; cursor:pointer; box-shadow:0 1px 5px rgba(0,0,0,.3); color:#666; }
 #map-toggles button.active { background:#464E2E; color:#fff; border-color:#464E2E; }
-#map-toggles button .dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+#map-toggles button svg { width:18px; height:18px; }
 
-/* Panneau filtre cotation */
-#grade-panel { display:none; background:#fff; border:2px solid rgba(0,0,0,.2); border-radius:4px; padding:10px 12px; box-shadow:0 1px 5px rgba(0,0,0,.3); color:#333; width:200px; }
+/* Panneau filtre cotation — s'ouvre sous la ligne de boutons */
+#grade-panel { display:none; position:absolute; top:40px; left:0; background:#fff; border:2px solid rgba(0,0,0,.2); border-radius:4px; padding:10px 12px; box-shadow:0 1px 5px rgba(0,0,0,.3); color:#333; width:200px; }
 #grade-panel.open { display:block; }
 #grade-panel .label { font-size:13px; font-weight:700; text-align:center; margin-bottom:8px; }
 #grade-panel .label span { color:#f97316; }
@@ -85,14 +103,14 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 
 <!-- Toggle blocs/rochers et parkings -->
 <div id="map-toggles">
-  <button id="toggle-blocs" class="active" onclick="toggleBlocs()">
-    <span class="dot" style="background:#ef4444"></span> Blocs
+  <button id="toggle-blocs" class="active" onclick="toggleBlocs()" title="Blocs">
+    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
   </button>
-  <button id="toggle-parkings" class="active" onclick="toggleParkings()">
-    <span class="dot" style="background:#3b82f6"></span> Parkings
+  <button id="toggle-parkings" class="active" onclick="toggleParkings()" title="Parkings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="bold" fill="currentColor" stroke="none">P</text></svg>
   </button>
-  <button id="toggle-grade" onclick="toggleGradePanel()">
-    <span class="dot" style="background:#f97316"></span> Cotation
+  <button id="toggle-grade" onclick="toggleGradePanel()" title="Filtre cotation">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="16" y2="12"/><line x1="4" y1="18" x2="12" y2="18"/><circle cx="8" cy="6" r="2" fill="currentColor"/><circle cx="14" cy="12" r="2" fill="currentColor"/><circle cx="10" cy="18" r="2" fill="currentColor"/></svg>
   </button>
   <div id="grade-panel">
     <div class="label"><span id="grade-min-lbl">1</span> &rarr; <span id="grade-max-lbl">9a</span></div>
@@ -110,6 +128,30 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
     <span id="gps-info" style="color:#4285F4;font-weight:bold">GPS: ...</span>
     <button onclick="syncPhotos()" style="background:#22c55e;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:bold">Sync</button>
     <button onclick="exportData()" style="background:#3b82f6;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">JSON</button>
+  </div>
+</div>
+
+<!-- Panneau photo Boolder (moitie basse de l'ecran) -->
+<div id="bloc-panel">
+  <div class="panel-bar">
+    <!-- Boutons icones compacts -->
+    <div class="actions">
+      <button class="icon-btn" id="panel-btn-photo" style="background:#3b82f6;color:#fff" title="Prendre une photo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+      <button class="icon-btn" id="panel-btn-gallery" style="background:#6b7280;color:#fff" title="Choisir depuis la galerie"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>
+      <button class="icon-btn" id="panel-btn-view" style="background:#22c55e;color:#fff;display:none" title="Voir / Lier blocs"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+      <a class="icon-btn" id="panel-btn-boolder" href="#" target="_blank" rel="noopener" style="background:#464E2E;color:#fff;display:none;text-decoration:none" title="Voir sur Boolder"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+    </div>
+    <!-- Nom + cotation -->
+    <div class="bloc-info">
+      <h3 id="panel-name"></h3>
+      <span id="panel-grade" class="grade-badge"></span>
+    </div>
+    <button class="close-btn" onclick="closeBlocPanel()">&times;</button>
+  </div>
+  <div class="panel-body" id="panel-body">
+    <span class="loading" id="panel-loading">Chargement...</span>
+    <img id="panel-img" style="display:none">
+    <div class="no-photo" id="panel-no-photo" style="display:none">Pas de photo Boolder</div>
   </div>
 </div>
 
@@ -254,7 +296,7 @@ function freeSyncedImages(){
 }
 
 /* === Etat global === */
-let blocsData=null,rochersData=null,droneData=null,boulderGroups=null;
+let blocsData=null,rochersData=null,droneData=null,boulderGroups=null,topoLookup=null;
 let photoGroupMap={};/* wcId -> [wcId, ...] — blocs sur la même photo */
 let boolderPhotoIds=new Set();/* wcId des blocs ayant une photo topo sur Boolder */
 let blocMarkers={};/* id -> L.circleMarker */
@@ -265,6 +307,7 @@ let blocsVisible=true;
 let parkingsVisible=true;
 let photosMap={};/* blocId -> [{photoId, hasTrace}] */
 let currentBlocId=null;
+let selectedBlocId=null;/* id du bloc avec l'aura */
 let currentPhotoId=null;
 let tracePoints=[];
 let drawing=false;
@@ -273,9 +316,9 @@ let drawing=false;
 const ign=L.tileLayer('https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',{maxZoom:22,maxNativeZoom:19,attribution:'IGN'});
 const osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:22,maxNativeZoom:19,attribution:'OSM'});
 
-let currentTile='ign';
+let currentTile='osm';
 const map=L.map('map',{
-  layers:[ign],
+  layers:[osm],
   zoomControl:false,
   attributionControl:false
 }).setView([48.41,2.63],13);
@@ -286,20 +329,33 @@ L.control.zoom({position:'topright'}).addTo(map);
 const tileToggle=L.control({position:'topright'});
 tileToggle.onAdd=function(){
   const btn=L.DomUtil.create('div','');
-  btn.innerHTML='<button id="tile-btn" style="display:flex;align-items:center;justify-content:center;padding:6px 12px;background:#fff;border:2px solid rgba(0,0,0,.2);border-radius:4px;font-size:13px;font-weight:bold;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3);color:#333">Carte</button>';
+  btn.innerHTML='<button id="tile-btn" style="display:flex;align-items:center;justify-content:center;padding:6px 12px;background:#fff;border:2px solid rgba(0,0,0,.2);border-radius:4px;font-size:13px;font-weight:bold;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3);color:#333">Satellite</button>';
   btn.querySelector('button').onclick=function(){
-    if(currentTile==='ign'){
-      map.removeLayer(ign); map.addLayer(osm); currentTile='osm';
-      this.textContent='IGN';
-    } else {
+    if(currentTile==='osm'){
       map.removeLayer(osm); map.addLayer(ign); currentTile='ign';
       this.textContent='Carte';
+    } else {
+      map.removeLayer(ign); map.addLayer(osm); currentTile='osm';
+      this.textContent='Satellite';
     }
   };
   L.DomEvent.disableClickPropagation(btn);
   return btn;
 };
 tileToggle.addTo(map);
+
+/* Fermer le panneau bloc / annuler liaison quand on clique sur la carte (zone vide) */
+map.on('click',()=>{
+  if(linkMode){
+    linkMode=false;
+    currentPhotoData=null;
+    updateStatus();
+    return;
+  }
+  if(document.getElementById('bloc-panel').classList.contains('active')){
+    closeBlocPanel();
+  }
+});
 
 /* Localisation GPS — suivi continu avec cercle de précision */
 map.locate({watch:true,enableHighAccuracy:true,maximumAge:0,timeout:10000});
@@ -358,14 +414,16 @@ gpsBtn.addTo(map);
 
 /* === Chargement des donnees === */
 async function loadData(){
-  const[blocsR,rochersR,droneR,groupsR,parkingsR]=await Promise.all([
+  const[blocsR,rochersR,droneR,groupsR,parkingsR,topoR]=await Promise.all([
     fetch('wc-blocs.geojson').then(r=>r.json()),
     fetch('boolder-rochers.geojson').then(r=>r.json()),
     fetch('drone-missions.json').then(r=>r.json()),
     fetch('boulder-groups.json').then(r=>r.json()),
-    fetch('parkings.json').then(r=>r.json()).catch(()=>[])
+    fetch('parkings.json').then(r=>r.json()).catch(()=>[]),
+    fetch('boolder-topos.json').then(r=>r.json()).catch(()=>({}))
   ]);
   blocsData=blocsR;
+  topoLookup=topoR;
   rochersData=rochersR;
   droneData=droneR;
   boulderGroups=groupsR;
@@ -402,7 +460,7 @@ async function loadData(){
       radius:8,weight:1.5,
       color:'#fff',fillColor:getBlocColor(id),fillOpacity:0.9
     });
-    marker.on('click',()=>handleBlocClick(id,lat,lon,p));
+    marker.on('click',(e)=>{L.DomEvent.stopPropagation(e);handleBlocClick(id,lat,lon,p)});
     blocMarkers[id]=marker;
     blocCluster.addLayer(marker);
   });
@@ -492,7 +550,7 @@ async function loadData(){
     const marker=L.circleMarker([tb.lat,tb.lon],{
       radius:8,weight:1.5,color:'#fff',fillColor:getBlocColor(tb.id),fillOpacity:0.9
     });
-    marker.on('click',()=>handleBlocClick(tb.id,tb.lat,tb.lon,tb));
+    marker.on('click',(e)=>{L.DomEvent.stopPropagation(e);handleBlocClick(tb.id,tb.lat,tb.lon,tb)});
     blocMarkers[tb.id]=marker;
     blocCluster.addLayer(marker);
   });
@@ -680,69 +738,114 @@ function refreshPhotoState(){
 }
 
 /* === Popup bloc === */
-function openBlocPopup(id,lat,lon,props){
+/* === Panneau bloc (split-screen : carte en haut, photo Boolder en bas) === */
+function openBlocPanel(id,lat,lon,props){
+  /* Retirer l'aura du bloc precedent */
+  if(selectedBlocId && blocMarkers[selectedBlocId]){
+    blocMarkers[selectedBlocId].setStyle({radius:8, weight:1.5});
+  }
   currentBlocId=id;
-  const status=photosMap[id]?
-    (photosMap[id].some(p=>p.hasTrace)?'<span style="color:#22c55e">Valide</span>':'<span style="color:#f97316">Photo OK</span>'):
-    '<span style="color:#ef4444">Pas de photo</span>';
+  selectedBlocId=id;
+  map.closePopup();
 
+  /* Aura : agrandir le marqueur selectionne avec bordure bleue epaisse */
+  if(blocMarkers[id]){
+    blocMarkers[id].setStyle({radius:14, weight:4, color:'#3b82f6'});
+    blocMarkers[id].bringToFront();
+  }
+
+  /* Remplir l'en-tete */
+  document.getElementById('panel-name').textContent=props.name||'Bloc #'+id;
+  document.getElementById('panel-grade').textContent=props.grade||'?';
+
+  /* Boutons d'action */
+  const btnPhoto=document.getElementById('panel-btn-photo');
+  btnPhoto.textContent=photosMap[id]?'Nouvelle photo':'Photo';
+  btnPhoto.onclick=()=>takePhoto(id);
+
+  document.getElementById('panel-btn-gallery').onclick=()=>chooseFromGallery(id);
+
+  const btnView=document.getElementById('panel-btn-view');
+  if(photosMap[id]){
+    btnView.style.display='';
+    btnView.onclick=()=>openPhotoView(id);
+  }else{
+    btnView.style.display='none';
+  }
+
+  const btnBoolder=document.getElementById('panel-btn-boolder');
   const boolderUrl=props.boolderUrl||props.url||'';
-  /* Recuperer la photo existante pour ce bloc */
-  let photoHtml='';
+  if(boolderUrl){
+    btnBoolder.style.display='';
+    btnBoolder.href=boolderUrl;
+  }else{
+    btnBoolder.style.display='none';
+  }
+
+  /* Afficher le panneau + passer la carte en demi-ecran */
+  const panelEl=document.getElementById('bloc-panel');
+  const imgEl=document.getElementById('panel-img');
+  const loadingEl=document.getElementById('panel-loading');
+  const noPhotoEl=document.getElementById('panel-no-photo');
+  imgEl.style.display='none';
+  imgEl.src='';
+  loadingEl.style.display='';
+  noPhotoEl.style.display='none';
+
+  panelEl.classList.add('active');
+  document.getElementById('map').classList.add('half');
+  /* Attendre que le resize CSS soit applique, puis recalculer la carte et centrer */
+  setTimeout(()=>{
+    map.invalidateSize({animate:false});
+    map.panTo([lat,lon],{animate:true,duration:0.3});
+  },50);
+
+  /* Priorite : photo perso (IndexedDB) > photo Boolder */
   if(photosMap[id]){
     const photoId=photosMap[id][photosMap[id].length-1].photoId;
-    photoHtml='<div id="popup-photo-wrap-'+id+'" style="position:relative;margin:6px 0;cursor:pointer" onclick="openTraceMode(\''+id+'\')"><img id="popup-photo-'+id+'" style="width:100%;border-radius:6px;max-height:200px;object-fit:cover;display:block"><svg id="popup-svg-'+id+'" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none" viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div>';
-    /* Charger l image + traces depuis IndexedDB apres le rendu */
-    setTimeout(()=>{
-      const tx=db.transaction('photos','readonly');
-      const req=tx.objectStore('photos').get(photoId);
-      req.onsuccess=()=>{
-        if(!req.result)return;
-        const el=document.getElementById('popup-photo-'+id);
-        if(!req.result.image){
-          /* Image libérée après synchronisation : elle est sur le serveur. */
-          const wrap=document.getElementById('popup-photo-wrap-'+id);
-          if(wrap){
-            wrap.onclick=null; wrap.style.cursor='default';
-            wrap.innerHTML='<div style="padding:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px;color:#16a34a;text-align:center">&#10003; Photo synchronisée<br><span style="color:#666">(stockée sur le serveur)</span></div>';
-          }
-          return;
-        }
-        if(el)el.src=req.result.image;
-        /* Dessiner les traces */
-        const svgEl=document.getElementById('popup-svg-'+id);
-        if(svgEl&&req.result.traces){
-          const bids=req.result.blocIds||[];
-          bids.forEach((bid,i)=>{
-            const t=req.result.traces[bid];
-            if(!t||t.length<2)return;
-            const color=TRACE_COLORS[i%TRACE_COLORS.length];
-            const path=document.createElementNS('http://www.w3.org/2000/svg','path');
-            path.setAttribute('fill','none');
-            path.setAttribute('stroke',color);
-            path.setAttribute('stroke-width','1.5');
-            path.setAttribute('stroke-linecap','round');
-            path.setAttribute('d',catmullRomToSVG(t));
-            svgEl.appendChild(path);
-          });
-        }
+    getPhoto(photoId).then(photo=>{
+      if(photo&&photo.image){
+        imgEl.onload=()=>{ loadingEl.style.display='none'; imgEl.style.display=''; };
+        imgEl.src=photo.image;
+      }else if(photo&&photo.synced){
+        loadingEl.style.display='none';
+        noPhotoEl.textContent='Photo synchronisee (sur le serveur)';
+        noPhotoEl.style.display='';
+      }else{
+        loadingEl.style.display='none';
+        noPhotoEl.style.display='';
+      }
+    }).catch(()=>{ loadingEl.style.display='none'; noPhotoEl.style.display=''; });
+  }else{
+    /* Pas de photo perso : charger la photo Boolder */
+    const boolderId=props.boolderId;
+    const topoId=boolderId && topoLookup ? topoLookup[boolderId] : null;
+    if(topoId){
+      const topoUrl='https://assets.boolder.com/proxy/topos/'+topoId;
+      imgEl.onload=()=>{
+        /* Boolder peut retourner 200 avec Content-Length:0 (photo vide) */
+        if(imgEl.naturalWidth===0){loadingEl.style.display='none';noPhotoEl.style.display='';return;}
+        loadingEl.style.display='none'; imgEl.style.display='';
       };
-    },50);
+      imgEl.onerror=()=>{ loadingEl.style.display='none'; noPhotoEl.style.display=''; };
+      imgEl.src=topoUrl;
+    }else{
+      loadingEl.style.display='none';
+      noPhotoEl.style.display='';
+    }
   }
-  const html=`<div class="bloc-popup">
-    <h3>${props.name||'Bloc #'+id}</h3>
-    <span class="grade">${props.grade||'?'}</span> ${status}
-    ${props.circuitColor?'<div class="circuit">Circuit '+props.circuitColor+' #'+(props.circuitNumber||'')+'</div>':''}
-    ${photoHtml}
-    ${!photosMap[id]&&boolderUrl?'<a href="'+boolderUrl+'" target="_blank" style="display:block;margin:6px 0;color:#3b82f6;font-size:12px">Voir sur Boolder</a>':''}
-    <div class="actions">
-      <button class="btn bloc-btn-photo" onclick="takePhoto('${id}')">${photosMap[id]?'Nouvelle photo':'Photo'}</button>
-      <button class="btn bloc-btn-gallery" onclick="chooseFromGallery('${id}')">Galerie</button>
-      ${photosMap[id]?'<button class="btn bloc-btn-done" onclick="openPhotoView(\''+id+'\')">Voir / Lier</button>':''}
-    </div>
-  </div>`;
+}
 
-  L.popup({maxWidth:280}).setLatLng([lat,lon]).setContent(html).openOn(map);
+function closeBlocPanel(){
+  document.getElementById('bloc-panel').classList.remove('active');
+  document.getElementById('map').classList.remove('half');
+  map.invalidateSize();
+  /* Retirer l'aura du bloc */
+  if(selectedBlocId && blocMarkers[selectedBlocId]){
+    blocMarkers[selectedBlocId].setStyle({radius:8, weight:1.5, color:'#fff'});
+    selectedBlocId=null;
+  }
+  currentBlocId=null;
 }
 
 /* === Prise / choix de photo ===
@@ -795,13 +898,13 @@ async function onPhotoSelected(e){
     try{ localStorage.removeItem('wc-pending-bloc'); }catch(e){ /* ignore */ }
     await refreshPhotoState();
     updateStatus();
-    map.closePopup();
 
-    /* Ouvrir la vue photo pour lier d'autres blocs */
-    currentPhotoId=photoId;
-    const tx2=db.transaction('photos','readonly');
-    const req2=tx2.objectStore('photos').get(photoId);
-    req2.onsuccess=()=>{if(req2.result)openPhotoModal(req2.result)};
+    /* Revenir au panneau bloc avec la photo qu'on vient de prendre */
+    const feat=blocsData.features.find(f=>f.properties.id===currentBlocId);
+    if(feat){
+      const[lon,lat]=feat.geometry.coordinates;
+      openBlocPanel(currentBlocId,lat,lon,feat.properties);
+    }
   };
   reader.readAsDataURL(file);
   e.target.value='';
@@ -928,7 +1031,7 @@ function handleBlocClick(id,lat,lon,props){
     toggleLinkBloc(id);
     return;
   }
-  openBlocPopup(id,lat,lon,props);
+  openBlocPanel(id,lat,lon,props);
 }
 
 /* Catmull-Rom pour l'affichage des traces dans les popups (tracees sur WikiClimb) */

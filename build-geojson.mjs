@@ -62,14 +62,25 @@ writeFileSync("wc-blocs.geojson", JSON.stringify({ type: "FeatureCollection", fe
 console.log(`wc-blocs.geojson ecrit (${features.length} features)`);
 
 // 6. Adapter les photo-groups (Boolder IDs -> WC IDs)
-const boolderIdToWcId = new Map();
+// Un boolderId peut correspondre a PLUSIEURS WC IDs (ex: "Bloc" et "Bloc (assis)"
+// sur les memes coords GPS). On garde TOUS les WC IDs par boolderId.
+const boolderIdToWcIds = new Map();
 for (const [wcId, bId] of wcIdToBoolderId) {
-  boolderIdToWcId.set(bId, wcId);
+  if (!boolderIdToWcIds.has(bId)) boolderIdToWcIds.set(bId, []);
+  boolderIdToWcIds.get(bId).push(wcId);
 }
 
 const photoGroups = JSON.parse(readFileSync("photo-groups.json", "utf-8"));
 const wcGroups = photoGroups
-  .map(group => group.map(bId => boolderIdToWcId.get(bId)).filter(Boolean))
+  .map(group => {
+    // Chaque boolderId peut donner plusieurs WC IDs -> on les expanse tous
+    const wcIds = [];
+    for (const bId of group) {
+      const ids = boolderIdToWcIds.get(bId);
+      if (ids) wcIds.push(...ids);
+    }
+    return wcIds;
+  })
   .filter(g => g.length >= 2); // garder les groupes avec au moins 2 blocs
 
 writeFileSync("photo-groups-wc.json", JSON.stringify(wcGroups));
