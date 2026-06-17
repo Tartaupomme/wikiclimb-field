@@ -1096,6 +1096,7 @@ function autoSyncBlocked(silent){
 }
 
 async function autoSync(silent){
+  if(silent) return;/* Synchro automatique désactivée : envoi uniquement via le bouton Sync */
   if(autoSyncBlocked(silent)) return;
   if(!navigator.onLine){ if(!silent){ alert('Hors ligne — réessaie quand tu auras du réseau.'); } return; }
   const ids=await getUnsyncedIds();
