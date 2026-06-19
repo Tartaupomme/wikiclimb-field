@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>WikiClimb Field</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
+#map { height:100vh; width:100%; transition:height 0.2s ease; }
+#map.half { height:50vh; }
+/* Remonter les contrôles Leaflet au-dessus de la status bar (36px) */
+.leaflet-bottom { bottom:44px !important; }
+#map.half .leaflet-bottom { bottom:0 !important; }
+
+/* Panneau photo Boolder (moitie basse) */
+#bloc-panel { display:none; position:fixed; bottom:0; left:0; right:0; height:50vh; background:#111; z-index:900; flex-direction:column; }
+#bloc-panel.active { display:flex; }
+/* Barre unique : icones actions | nom tronque | cotation | fermer */
+#bloc-panel .panel-bar { display:flex; align-items:center; gap:6px; padding:6px 10px; background:#1a1a1a; border-top:2px solid #333; flex-shrink:0; }
+#bloc-panel .panel-bar .actions { display:flex; gap:4px; flex-shrink:0; }
+#bloc-panel .panel-bar .icon-btn { width:34px; height:34px; border:none; border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+#bloc-panel .panel-bar .bloc-info { flex:1; min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; }
+#bloc-panel .panel-bar .bloc-info h3 { margin:0; font-size:13px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#bloc-panel .panel-bar .grade-badge { background:#f97316; color:#fff; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:bold; flex-shrink:0; }
+#bloc-panel .panel-bar .close-btn { background:none; border:none; color:#999; font-size:22px; cursor:pointer; padding:0 4px; flex-shrink:0; }
+#bloc-panel .panel-body { flex:1; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#000; position:relative; }
+#bloc-panel .panel-body img { max-width:100%; max-height:100%; object-fit:contain; }
+#bloc-panel .panel-body .loading { color:#666; font-size:14px; }
+#bloc-panel .panel-body .no-photo { color:#666; font-size:13px; text-align:center; padding:20px; }
+
+/* Popup bloc */
+.bloc-popup { min-width:200px; }
+.bloc-popup h3 { margin:0 0 4px; font-size:15px; }
+.bloc-popup .grade { display:inline-block; background:#f97316; color:#fff; padding:1px 8px; border-radius:10px; font-size:13px; font-weight:bold; }
+.bloc-popup .circuit { font-size:12px; color:#888; margin-top:2px; }
+.bloc-popup img { width:100%; border-radius:6px; margin:6px 0; }
+.bloc-popup .actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+.bloc-popup .btn { flex:1; padding:8px; border:none; border-radius:6px; font-size:13px; font-weight:bold; cursor:pointer; text-align:center; }
+.bloc-btn-photo { background:#3b82f6; color:#fff; }
+.bloc-btn-gallery { background:#6b7280; color:#fff; }
+.bloc-btn-done { background:#22c55e; color:#fff; }
+
+/* Status bar */
+#status-bar { position:fixed; bottom:0; left:0; right:0; background:rgba(0,0,0,.85); color:#fff; padding:8px 16px; font-size:12px; z-index:1000; display:flex; justify-content:space-between; align-items:center; }
+#status-bar .sync-btn { background:#f97316; border:none; color:#fff; padding:4px 12px; border-radius:4px; font-size:12px; cursor:pointer; }
+
+/* Photo modal */
+#photo-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.95); z-index:2000; flex-direction:column; }
+#photo-modal.active { display:flex; }
+#photo-modal .toolbar { padding:8px 12px; display:flex; justify-content:space-between; align-items:center; background:#111; }
+#photo-modal .toolbar button { background:#333; border:none; color:#fff; padding:6px 14px; border-radius:6px; font-size:14px; cursor:pointer; }
+#photo-modal .toolbar .save-btn { background:#22c55e; }
+#photo-modal .toolbar .cancel-btn { background:#ef4444; }
+#photo-canvas-wrap { flex:1; position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#000; }
+#photo-canvas-wrap img { max-width:100%; max-height:100%; display:block; }
+#trace-svg { position:absolute; pointer-events:auto; }
+
+/* Toggle controls en haut a gauche — ligne horizontale d'icones */
+#map-toggles { position:fixed; top:10px; left:10px; z-index:800; display:flex; flex-direction:row; gap:4px; align-items:flex-start; }
+#map-toggles button { display:flex; align-items:center; justify-content:center; width:34px; height:34px; padding:0; background:#fff; border:2px solid rgba(0,0,0,.2); border-radius:6px; cursor:pointer; box-shadow:0 1px 5px rgba(0,0,0,.3); color:#666; }
+#map-toggles button.active { background:#464E2E; color:#fff; border-color:#464E2E; }
+#map-toggles button svg { width:18px; height:18px; }
+
+/* Panneau filtre cotation — s'ouvre sous la ligne de boutons */
+#grade-panel { display:none; position:absolute; top:40px; left:0; background:#fff; border:2px solid rgba(0,0,0,.2); border-radius:4px; padding:10px 12px; box-shadow:0 1px 5px rgba(0,0,0,.3); color:#333; width:200px; }
+#grade-panel.open { display:block; }
+#grade-panel .label { font-size:13px; font-weight:700; text-align:center; margin-bottom:8px; }
+#grade-panel .label span { color:#f97316; }
+/* Slider double : deux range superposés sur une piste commune */
+#grade-slider { position:relative; height:28px; }
+#grade-slider .track { position:absolute; top:12px; left:0; right:0; height:4px; background:#ddd; border-radius:2px; }
+#grade-slider .track .fill { position:absolute; top:0; bottom:0; background:#f97316; border-radius:2px; }
+#grade-slider input[type=range] { position:absolute; top:0; left:0; width:100%; height:28px; margin:0; background:none; pointer-events:none; -webkit-appearance:none; appearance:none; }
+#grade-slider input[type=range]::-webkit-slider-thumb { pointer-events:auto; -webkit-appearance:none; appearance:none; width:18px; height:18px; border-radius:50%; background:#f97316; border:2px solid #fff; box-shadow:0 1px 3px rgba(0,0,0,.4); cursor:pointer; }
+#grade-slider input[type=range]::-moz-range-thumb { pointer-events:auto; width:18px; height:18px; border-radius:50%; background:#f97316; border:2px solid #fff; box-shadow:0 1px 3px rgba(0,0,0,.4); cursor:pointer; }
+#grade-slider input[type=range]::-moz-range-track { background:none; }
+
+/* Hidden file input */
+#camera-input, #gallery-input { display:none; }
+
+/* Bandeau mode liaison (en haut) */
+#link-bar { display:none; position:fixed; top:0; left:0; right:0; z-index:1500; background:#1d4ed8; color:#fff; padding:10px 14px; align-items:center; justify-content:space-between; gap:10px; box-shadow:0 2px 8px rgba(0,0,0,.4); }
+#link-bar.active { display:flex; }
+#link-bar span { font-size:13px; font-weight:600; }
+#link-bar button { background:#fbbf24; color:#1e293b; border:none; padding:6px 16px; border-radius:6px; font-size:13px; font-weight:bold; cursor:pointer; white-space:nowrap; }
+/* --- Marqueur de position avec direction --- */
+.gps-divicon{background:none;border:none;}
+.gps-wrap{position:relative;width:24px;height:24px;}
+.gps-dot{position:absolute;top:50%;left:50%;width:16px;height:16px;
+  transform:translate(-50%,-50%);background:#4285F4;border:3px solid #fff;
+  border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.4);box-sizing:border-box;}
+/* Le cône part du centre du point et s'évase vers la direction du regard.
+   Pointe en bas (origine), il est tourné via rotate(headingDeg). */
+.gps-cone{position:absolute;bottom:50%;left:50%;width:34px;height:34px;
+  transform-origin:50% 100%;
+  background:conic-gradient(from -20deg at 50% 100%,
+    rgba(66,133,244,0) 0deg,
+    rgba(66,133,244,.55) 20deg,
+    rgba(66,133,244,0) 40deg);
+  clip-path:polygon(50% 100%, 0 0, 100% 0);
+  pointer-events:none;}
+
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- Bandeau mode liaison : toucher les blocs sur la carte pour les lier à la photo -->
+<div id="link-bar">
+  <span id="link-bar-text">Touchez les blocs à lier</span>
+  <button onclick="endLinkMode()">Terminer</button>
+</div>
+
+<!-- Toggle blocs/rochers et parkings -->
+<div id="map-toggles">
+  <button id="toggle-blocs" class="active" onclick="toggleBlocs()" title="Blocs">
+    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
+  </button>
+  <button id="toggle-parkings" class="active" onclick="toggleParkings()" title="Parkings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/><text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="bold" fill="currentColor" stroke="none">P</text></svg>
+  </button>
+  <button id="toggle-grade" onclick="toggleGradePanel()" title="Filtre cotation">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="16" y2="12"/><line x1="4" y1="18" x2="12" y2="18"/><circle cx="8" cy="6" r="2" fill="currentColor"/><circle cx="14" cy="12" r="2" fill="currentColor"/><circle cx="10" cy="18" r="2" fill="currentColor"/></svg>
+  </button>
+  <div id="grade-panel">
+    <div class="label"><span id="grade-min-lbl">1</span> &rarr; <span id="grade-max-lbl">9a</span></div>
+    <div id="grade-slider">
+      <div class="track"><div class="fill" id="grade-fill"></div></div>
+      <input type="range" id="grade-lo" min="0" value="0">
+      <input type="range" id="grade-hi" min="0" value="0">
+    </div>
+  </div>
+</div>
+
+<div id="status-bar">
+  <span id="status-text">Chargement...</span>
+  <div style="display:flex;gap:6px;align-items:center">
+    <span id="gps-info" style="color:#4285F4;font-weight:bold">GPS: ...</span>
+    <span id="compass-info" style="color:#f59e0b;font-weight:bold;font-size:11px">⊙ --</span>
+    <button onclick="syncPhotos()" style="background:#22c55e;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:bold">Sync</button>
+    <button onclick="exportData()" style="background:#3b82f6;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">JSON</button>
+  </div>
+</div>
+
+<!-- Panneau photo Boolder (moitie basse de l'ecran) -->
+<div id="bloc-panel">
+  <div class="panel-bar">
+    <!-- Boutons icones compacts -->
+    <div class="actions">
+      <button class="icon-btn" id="panel-btn-photo" style="background:#3b82f6;color:#fff" title="Prendre une photo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+      <button class="icon-btn" id="panel-btn-gallery" style="background:#6b7280;color:#fff" title="Choisir depuis la galerie"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>
+      <button class="icon-btn" id="panel-btn-view" style="background:#22c55e;color:#fff;display:none" title="Voir / Lier blocs"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+      <a class="icon-btn" id="panel-btn-boolder" href="#" target="_blank" rel="noopener" style="background:#464E2E;color:#fff;display:none;text-decoration:none" title="Voir sur Boolder"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+    </div>
+    <!-- Nom + cotation -->
+    <div class="bloc-info">
+      <h3 id="panel-name"></h3>
+      <span id="panel-grade" class="grade-badge"></span>
+    </div>
+    <button class="close-btn" onclick="closeBlocPanel()">&times;</button>
+  </div>
+  <div class="panel-body" id="panel-body">
+    <span class="loading" id="panel-loading">Chargement...</span>
+    <img id="panel-img" style="display:none">
+    <div class="no-photo" id="panel-no-photo" style="display:none">Pas de photo Boolder</div>
+  </div>
+</div>
+
+<!-- Inputs natifs caches : camera (capture direct) et galerie (choisir un fichier) -->
+<input type="file" id="camera-input" accept="image/*" capture="environment">
+<input type="file" id="gallery-input" accept="image/*">
+
+<!-- Modal trace sur photo -->
+<div id="photo-modal">
+  <div class="toolbar">
+    <button class="cancel-btn" onclick="closePhotoModal()">Fermer</button>
+    <span id="modal-title" style="color:#fff;font-weight:bold;font-size:13px"></span>
+    <button class="save-btn" onclick="saveAndClose()">OK</button>
+  </div>
+  <div id="bloc-list-bar" style="background:#222;padding:6px 8px;display:flex;gap:4px;overflow-x:auto;align-items:center;flex-wrap:wrap">
+    <div id="bloc-chips" style="display:flex;gap:4px;flex:1;overflow-x:auto;flex-wrap:wrap"></div>
+    <button onclick="startLinkMode()" style="background:#3b82f6;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">+ Lier bloc</button>
+  </div>
+  <div id="photo-canvas-wrap">
+    <img id="photo-img">
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+/* === PWA Service Worker === */
+if('serviceWorker' in navigator){
+  /* Virer les anciens SW qui avaient des chemins absolus (/) */
+  navigator.serviceWorker.getRegistrations().then(regs=>{
+    regs.forEach(r=>r.unregister());
+  }).then(()=>{
+    navigator.serviceWorker.register('./sw.js');
+  });
+}
+
+/* === IndexedDB pour photos + traces === */
+const DB_NAME='wc-field';
+const DB_VER=1;
+let db;
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(DB_NAME,DB_VER);
+    req.onupgradeneeded=e=>{
+      const d=e.target.result;
+      if(!d.objectStoreNames.contains('photos')){
+        d.createObjectStore('photos',{keyPath:'id',autoIncrement:true});
+      }
+    };
+    req.onsuccess=e=>{db=e.target.result;resolve(db)};
+    req.onerror=e=>reject(e);
+  });
+}
+function addPhoto(data){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readwrite');
+    const store=tx.objectStore('photos');
+    const req=store.add(data);
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=e=>reject(e);
+  });
+}
+function getAllPhotos(){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readonly');
+    const store=tx.objectStore('photos');
+    const req=store.getAll();
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=e=>reject(e);
+  });
+}
+function updatePhoto(data){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readwrite');
+    const store=tx.objectStore('photos');
+    const req=store.put(data);
+    req.onsuccess=()=>resolve();
+    req.onerror=e=>reject(e);
+  });
+}
+function deletePhoto(id){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readwrite');
+    const store=tx.objectStore('photos');
+    const req=store.delete(id);
+    req.onsuccess=()=>resolve();
+    req.onerror=e=>reject(e);
+  });
+}
+function getPhoto(id){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readonly');
+    const req=tx.objectStore('photos').get(id);
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=e=>reject(e);
+  });
+}
+/* Compteurs via curseur : pic mémoire = 1 enregistrement (jamais toutes les images
+   en RAM d'un coup, contrairement à getAll()). */
+function getPhotoCounts(){
+  return new Promise((resolve,reject)=>{
+    let total=0,unsynced=0;
+    const tx=db.transaction('photos','readonly');
+    const req=tx.objectStore('photos').openCursor();
+    req.onsuccess=e=>{
+      const c=e.target.result;
+      if(c){ total++; if(!c.value.synced){ unsynced++; } c.continue(); }
+      else resolve({total,unsynced});
+    };
+    req.onerror=e=>reject(e);
+  });
+}
+/* IDs des photos à envoyer (non synchronisées et possédant encore leur image). */
+function getUnsyncedIds(){
+  return new Promise((resolve,reject)=>{
+    const ids=[];
+    const tx=db.transaction('photos','readonly');
+    const req=tx.objectStore('photos').openCursor();
+    req.onsuccess=e=>{
+      const c=e.target.result;
+      if(c){ if(!c.value.synced && c.value.image){ ids.push(c.value.id); } c.continue(); }
+      else resolve(ids);
+    };
+    req.onerror=e=>reject(e);
+  });
+}
+/* Nettoyage : libère l'image des photos déjà synchronisées qui la gardaient encore
+   (héritage d'avant le sync auto). Ne touche jamais aux photos non envoyées. */
+function freeSyncedImages(){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('photos','readwrite');
+    const req=tx.objectStore('photos').openCursor();
+    req.onsuccess=e=>{
+      const c=e.target.result;
+      if(c){
+        if(c.value.synced && c.value.image){ const v=c.value; delete v.image; c.update(v); }
+        c.continue();
+      }else resolve();
+    };
+    req.onerror=e=>reject(e);
+  });
+}
+
+/* === Etat global === */
+let blocsData=null,rochersData=null,droneData=null,boulderGroups=null,topoLookup=null;
+let photoGroupMap={};/* wcId -> [wcId, ...] — blocs sur la même photo */
+let boolderPhotoIds=new Set();/* wcId des blocs ayant une photo topo sur Boolder */
+let blocMarkers={};/* id -> L.circleMarker */
+let blocCluster=null;/* MarkerClusterGroup des blocs */
+let rochersLayer=null;/* GeoJSON des contours de rochers */
+let parkingLayer=null;/* LayerGroup des parkings */
+let blocsVisible=true;
+let parkingsVisible=true;
+let photosMap={};/* blocId -> [{photoId, hasTrace}] */
+let currentBlocId=null;
+let selectedBlocId=null;/* id du bloc avec l'aura */
+let currentPhotoId=null;
+let tracePoints=[];
+let drawing=false;
+
+/* === Carte === */
+const ign=L.tileLayer('https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',{maxZoom:22,maxNativeZoom:19,attribution:'IGN'});
+const osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:22,maxNativeZoom:19,attribution:'OSM'});
+
+let currentTile='osm';
+const map=L.map('map',{
+  layers:[osm],
+  zoomControl:false,
+  attributionControl:false
+}).setView([48.41,2.63],13);
+
+L.control.zoom({position:'topright'}).addTo(map);
+
+/* Toggle IGN / Carte — bouton simple en haut à droite */
+const tileToggle=L.control({position:'topright'});
+tileToggle.onAdd=function(){
+  const btn=L.DomUtil.create('div','');
+  btn.innerHTML='<button id="tile-btn" style="display:flex;align-items:center;justify-content:center;padding:6px 12px;background:#fff;border:2px solid rgba(0,0,0,.2);border-radius:4px;font-size:13px;font-weight:bold;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3);color:#333">Satellite</button>';
+  btn.querySelector('button').onclick=function(){
+    if(currentTile==='osm'){
+      map.removeLayer(osm); map.addLayer(ign); currentTile='ign';
+      this.textContent='Carte';
+    } else {
+      map.removeLayer(ign); map.addLayer(osm); currentTile='osm';
+      this.textContent='Satellite';
+    }
+  };
+  L.DomEvent.disableClickPropagation(btn);
+  return btn;
+};
+tileToggle.addTo(map);
+
+/* Fermer le panneau bloc / annuler liaison quand on clique sur la carte (zone vide) */
+map.on('click',()=>{
+  if(linkMode){
+    linkMode=false;
+    currentPhotoData=null;
+    updateStatus();
+    return;
+  }
+  if(document.getElementById('bloc-panel').classList.contains('active')){
+    closeBlocPanel();
+  }
+});
+
+/* Localisation GPS — suivi continu avec cercle de précision */
+map.locate({watch:true,enableHighAccuracy:true,maximumAge:0,timeout:10000});
+let gpsMarker=null;
+let gpsAccuracy=null;
+let lastGpsPos=null;
+let followGps=true; /* centrer la carte sur la position au démarrage */
+let headingDeg=null; /* cap boussole en degrés (0=Nord), null si inconnu */
+
+/* Icône de position avec cône de direction (style Google Maps).
+   Le cône n'apparaît que si on connaît l'orientation. */
+function buildGpsIcon(){
+  const cone = (headingDeg===null) ? '' :
+    '<div class="gps-cone" style="transform:translateX(-50%) rotate('+headingDeg+'deg)"></div>';
+  return L.divIcon({
+    className:'gps-divicon',
+    iconSize:[24,24],
+    iconAnchor:[12,12],
+    html:'<div class="gps-wrap">'+cone+'<div class="gps-dot"></div></div>'
+  });
+}
+
+map.on('locationfound',e=>{
+  lastGpsPos=e.latlng;
+  const acc=e.accuracy; /* précision en mètres */
+
+  if(!gpsMarker){
+    /* Marqueur position + cône de direction */
+    gpsMarker=L.marker(e.latlng,{icon:buildGpsIcon(),interactive:false,zIndexOffset:1000}).addTo(map);
+    /* Cercle de précision */
+    gpsAccuracy=L.circle(e.latlng,{radius:acc,color:'#4285F4',fillColor:'#4285F4',fillOpacity:0.1,weight:1,interactive:false}).addTo(map);
+    /* Premier fix : centrer la carte */
+    map.setView(e.latlng,17);
+  } else {
+    gpsMarker.setLatLng(e.latlng);
+    gpsAccuracy.setLatLng(e.latlng);
+    gpsAccuracy.setRadius(acc);
+  }
+
+  /* Suivre la position si le mode "follow" est actif */
+  if(followGps) map.panTo(e.latlng);
+
+  /* Afficher la précision dans la status bar */
+  document.getElementById('gps-info').textContent='GPS: '+Math.round(acc)+'m';
+});
+
+/* Met à jour seulement la rotation du cône (sans recréer le marqueur). */
+function refreshGpsHeading(){
+  if(!gpsMarker) return;
+  const el=gpsMarker.getElement();
+  if(!el) return;
+  let cone=el.querySelector('.gps-cone');
+  if(headingDeg===null){ if(cone) cone.style.display='none'; return; }
+  if(!cone){
+    /* le cône n'existait pas encore (orientation arrivée après le 1er fix) */
+    const wrap=el.querySelector('.gps-wrap');
+    if(wrap){ cone=document.createElement('div'); cone.className='gps-cone'; wrap.insertBefore(cone,wrap.firstChild); }
+  }
+  if(cone){ cone.style.display='block'; cone.style.transform='translateX(-50%) rotate('+headingDeg+'deg)'; }
+}
+
+/* --- Boussole : orientation du téléphone --- */
+let compassStarted=false;
+let compassGotEvent=false;
+function setCompassInfo(txt){ const el=document.getElementById('compass-info'); if(el) el.textContent=txt; }
+
+function handleOrientation(ev){
+  compassGotEvent=true;
+  let h=null;
+  if(typeof ev.webkitCompassHeading==='number'){
+    h=ev.webkitCompassHeading; /* iOS : déjà par rapport au Nord, sens horaire */
+  } else if(ev.absolute===true && typeof ev.alpha==='number'){
+    /* Android, orientation absolue : alpha = angle / Nord. */
+    h=360-ev.alpha;
+  } else if(typeof ev.alpha==='number'){
+    /* Fallback : alpha relatif (mieux que rien). */
+    h=360-ev.alpha;
+  }
+  if(h===null||isNaN(h)){ setCompassInfo('⊙ n/a'); return; }
+  /* Compenser la rotation de l'écran si dispo. */
+  if(screen.orientation && typeof screen.orientation.angle==='number'){ h-=screen.orientation.angle; }
+  h=((h%360)+360)%360;
+  /* Lissage léger pour éviter le tremblement de l'aiguille */
+  if(headingDeg===null) headingDeg=h;
+  else{
+    let diff=h-headingDeg;
+    while(diff>180) diff-=360; while(diff<-180) diff+=360;
+    headingDeg=((headingDeg+diff*0.25)%360+360)%360;
+  }
+  setCompassInfo('⊙ '+Math.round(headingDeg)+'°');
+  refreshGpsHeading();
+}
+
+function attachCompass(){
+  /* On écoute les DEUX événements : certains Android ne déclenchent que
+     l'un ou l'autre. handleOrientation déduplique via la valeur. */
+  if('ondeviceorientationabsolute' in window){
+    window.addEventListener('deviceorientationabsolute',handleOrientation,true);
+  }
+  window.addEventListener('deviceorientation',handleOrientation,true);
+  /* Si rien n'arrive au bout de 2s, on l'indique clairement. */
+  setTimeout(()=>{ if(!compassGotEvent) setCompassInfo('⊙ aucun signal'); },2000);
+}
+
+function startCompass(){
+  if(compassStarted) return; compassStarted=true;
+  /* iOS 13+ exige une autorisation déclenchée par un geste utilisateur. */
+  if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
+    DeviceOrientationEvent.requestPermission().then(state=>{
+      if(state==='granted'){ attachCompass(); } else { setCompassInfo('⊙ refusé'); }
+    }).catch(()=>{ setCompassInfo('⊙ refusé'); });
+  } else {
+    attachCompass();
+  }
+}
+/* On tente au chargement (Android n'a pas besoin de geste)... */
+startCompass();
+/* ...et aussi au premier toucher (obligatoire iOS, et filet de sécurité Android). */
+document.addEventListener('touchend',function once(){ startCompass(); },{once:true});
+map.on('click',startCompass);
+
+map.on('locationerror',e=>{
+  document.getElementById('gps-info').textContent='GPS: erreur';
+});
+
+/* Arrêter le suivi auto quand l'utilisateur déplace la carte manuellement */
+map.on('dragstart',()=>{ followGps=false; });
+
+/* Bouton "centrer sur moi" */
+const gpsBtn=L.control({position:'topright'});
+gpsBtn.onAdd=function(){
+  const div=L.DomUtil.create('div','leaflet-bar');
+  div.innerHTML='<a href="#" title="Centrer sur ma position" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;background:#fff;font-size:20px;text-decoration:none;color:#4285F4;border-radius:4px;box-shadow:0 1px 5px rgba(0,0,0,.3)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><line x1="12" y1="1" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="1" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="23" y2="12"/></svg></a>';
+  div.querySelector('a').onclick=function(e){
+    e.preventDefault();
+    if(lastGpsPos){
+      followGps=true;
+      map.setView(lastGpsPos,Math.max(map.getZoom(),17));
+    }
+  };
+  L.DomEvent.disableClickPropagation(div);
+  return div;
+};
+gpsBtn.addTo(map);
+
+/* === Chargement des donnees === */
+async function loadData(){
+  const[blocsR,rochersR,droneR,groupsR,parkingsR,topoR]=await Promise.all([
+    fetch('wc-blocs.geojson').then(r=>r.json()),
+    fetch('boolder-rochers.geojson').then(r=>r.json()),
+    fetch('drone-missions.json').then(r=>r.json()),
+    fetch('boulder-groups.json').then(r=>r.json()),
+    fetch('parkings.json').then(r=>r.json()).catch(()=>[]),
+    fetch('boolder-topos.json').then(r=>r.json()).catch(()=>({}))
+  ]);
+  blocsData=blocsR;
+  topoLookup=topoR;
+  rochersData=rochersR;
+  droneData=droneR;
+  boulderGroups=groupsR;
+
+  /* Contours de rochers (polygones gris) */
+  rochersLayer=L.geoJSON(rochersData,{
+    style:{color:'#9ca3af',weight:1,fillColor:'#6b7280',fillOpacity:0.3},
+    interactive:false
+  }).addTo(map);
+
+  /* Points des blocs — dans un MarkerClusterGroup pour regrouper quand dézoomé */
+  blocCluster=L.markerClusterGroup({
+    maxClusterRadius:40,
+    disableClusteringAtZoom:17, /* individuel à partir du zoom 17 */
+    spiderfyOnMaxZoom:false,
+    showCoverageOnHover:false,
+    iconCreateFunction:function(cluster){
+      const n=cluster.getChildCount();
+      let size='small', radius=30;
+      if(n>=50){ size='large'; radius=40; }
+      else if(n>=10){ size='medium'; radius=35; }
+      return L.divIcon({
+        html:'<div style="display:flex;align-items:center;justify-content:center;width:'+radius+'px;height:'+radius+'px;border-radius:50%;background:rgba(239,68,68,0.7);border:2px solid #fff;color:#fff;font-weight:bold;font-size:'+(n>=100?'11':'13')+'px;box-shadow:0 1px 4px rgba(0,0,0,.4)">'+n+'</div>',
+        className:'',
+        iconSize:[radius,radius]
+      });
+    }
+  });
+  blocsData.features.forEach(f=>{
+    const[lon,lat]=f.geometry.coordinates;
+    const p=f.properties;
+    const id=p.id;
+    const marker=L.circleMarker([lat,lon],{
+      radius:8,weight:1.5,
+      color:'#fff',fillColor:getBlocColor(id),fillOpacity:0.9
+    });
+    marker.on('click',(e)=>{L.DomEvent.stopPropagation(e);handleBlocClick(id,lat,lon,p)});
+    blocMarkers[id]=marker;
+    blocCluster.addLayer(marker);
+  });
+  map.addLayer(blocCluster);
+
+  /* === Contours colorés par groupe PHOTO (blocs sur la même face = même cadrage) ===
+     Données : photo-groups.json, extrait de la table lines/topos de Boolder.
+     Blocs partageant le même topo_id apparaissent sur la même photo.
+     Visible à partir du zoom 17 pour ne pas surcharger la carte de loin.
+     Chaque groupe reçoit une couleur distincte (palette de 10 couleurs). */
+  const GROUP_COLORS=['#f97316','#3b82f6','#a855f7','#ec4899','#06b6d4','#eab308','#22c55e','#ef4444','#8b5cf6','#14b8a6'];
+  const groupLayer=L.layerGroup();
+
+  /* Index rapide : id -> [lat, lon] depuis les features GeoJSON */
+  const blocCoords={};
+  blocsData.features.forEach(f=>{
+    const[lon,lat]=f.geometry.coordinates;
+    blocCoords[f.properties.id]=[lat,lon];
+  });
+
+  /* Charger les groupes photo (blocs partageant la même photo Boolder) */
+  const photoGroupsR=await fetch('photo-groups-wc.json').then(r=>r.json());
+
+  /* On NE crée PAS les ~6600 halos d'un coup : on stocke leur définition et on ne
+     rend que ceux visibles dans la fenêtre (cf. renderHalos). Rendre 6600 circleMarkers
+     d'un coup au zoom 17 provoquait un pic mémoire ; pendant l'appareil photo natif la
+     webview mobile était alors tuée par l'OS et la photo en cours était perdue. */
+  const haloDefs=[];/* {lat, lon, color} */
+  photoGroupsR.forEach((group,gi)=>{
+    const color=GROUP_COLORS[gi%GROUP_COLORS.length];
+    /* Construire le lookup : chaque bloc → ses siblings + marquer "photo Boolder" */
+    group.forEach(bid=>{
+      photoGroupMap[bid]=group.filter(id=>id!==bid);
+      boolderPhotoIds.add(bid);
+    });
+    group.forEach(bid=>{
+      const coords=blocCoords[bid];
+      if(coords) haloDefs.push({lat:coords[0],lon:coords[1],color});
+    });
+  });
+
+  /* Rend uniquement les halos de la fenêtre courante, et seulement au zoom >= 17.
+     On garde une trace des bornes déjà rendues pour ne pas reconstruire à chaque
+     micro-déplacement GPS (panTo continu). */
+  let haloRenderedBounds=null;
+  function renderHalos(){
+    if(map.getZoom()<17){
+      if(map.hasLayer(groupLayer)) map.removeLayer(groupLayer);
+      groupLayer.clearLayers();
+      haloRenderedBounds=null;
+      return;
+    }
+    const view=map.getBounds();
+    if(haloRenderedBounds && haloRenderedBounds.contains(view)) return;/* déjà couvert */
+    const b=view.pad(0.5);
+    groupLayer.clearLayers();
+    haloDefs.forEach(h=>{
+      if(b.contains([h.lat,h.lon])){
+        groupLayer.addLayer(L.circleMarker([h.lat,h.lon],{
+          radius:10, weight:2.5, color:h.color,
+          fill:false, opacity:0.7, interactive:false
+        }));
+      }
+    });
+    haloRenderedBounds=b;
+    if(!map.hasLayer(groupLayer)) map.addLayer(groupLayer);
+  }
+  map.on('zoomend',renderHalos);
+  map.on('moveend',renderHalos);
+  renderHalos();
+
+  /* === BLOCS DE TEST — rue Helena Fournier, Tours === */
+  const TEST_BLOCS=[
+    {id:'test-001',name:'Test Mur Nord',grade:'5a',lat:47.41995,lon:0.70720},
+    {id:'test-002',name:'Test Dalle Est',grade:'4b',lat:47.41988,lon:0.70755},
+    {id:'test-003',name:'Test Dévers',grade:'6a',lat:47.41978,lon:0.70740},
+    {id:'test-004',name:'Test Traverse',grade:'5c',lat:47.41983,lon:0.70710},
+    {id:'test-005',name:'Test Pilier',grade:'3b',lat:47.42005,lon:0.70760},
+    {id:'test-006',name:'Test Fissure',grade:'6b',lat:47.42010,lon:0.70700},
+  ];
+  TEST_BLOCS.forEach(tb=>{
+    blocsData.features.push({
+      type:'Feature',
+      geometry:{type:'Point',coordinates:[tb.lon,tb.lat]},
+      properties:{id:tb.id,name:tb.name,grade:tb.grade}
+    });
+    const marker=L.circleMarker([tb.lat,tb.lon],{
+      radius:8,weight:1.5,color:'#fff',fillColor:getBlocColor(tb.id),fillOpacity:0.9
+    });
+    marker.on('click',(e)=>{L.DomEvent.stopPropagation(e);handleBlocClick(tb.id,tb.lat,tb.lon,tb)});
+    blocMarkers[tb.id]=marker;
+    blocCluster.addLayer(marker);
+  });
+
+  /* Points drone (depart/arrivee) + trajet au clic */
+  let activeDronePath=null;
+  droneData.forEach(m=>{
+    const wps=m.waypoints;
+    if(!wps||wps.length<2)return;
+    const startMarker=L.marker([wps[0][0],wps[0][1]],{icon:L.divIcon({
+      className:'',
+      html:'<div style="background:#16a34a;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;border:1px solid #fff;white-space:nowrap;cursor:pointer">'+m.vol+'</div>',
+      iconAnchor:[10,10]
+    })}).addTo(map);
+    const endMarker=L.marker([wps[wps.length-1][0],wps[wps.length-1][1]],{icon:L.divIcon({
+      className:'',
+      html:'<div style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;border:1px solid #fff;white-space:nowrap;cursor:pointer">'+m.vol+'</div>',
+      iconAnchor:[10,10]
+    })}).addTo(map);
+    function showDronePath(){
+      if(activeDronePath){map.removeLayer(activeDronePath);activeDronePath=null}
+      activeDronePath=L.polyline(wps,{color:'#f97316',weight:2.5,opacity:0.9}).addTo(map);
+      activeDronePath.bindPopup('<b>Vol '+m.vol+'</b> — '+m.sector+'<br>'+m.time+' min | '+wps.length+' wp<br><button onclick=\"map.removeLayer(activeDronePath);activeDronePath=null;map.closePopup()\" style=\"margin-top:4px;padding:2px 8px;border:1px solid #ccc;border-radius:4px;cursor:pointer\">Masquer</button>').openPopup();
+    }
+    startMarker.on('click',showDronePath);
+    endMarker.on('click',showDronePath);
+  });
+
+  /* === Parkings (marqueurs bleus, cliquables → ouvrir dans Maps) === */
+  parkingLayer=L.layerGroup();
+  const parkingIcon=L.divIcon({
+    className:'',
+    html:'<div style="width:24px;height:24px;background:#3b82f6;border:2px solid #fff;border-radius:5px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:12px;box-shadow:0 1px 4px rgba(0,0,0,.4)">P</div>',
+    iconSize:[24,24],iconAnchor:[12,12],popupAnchor:[0,-12]
+  });
+  parkingsR.forEach(p=>{
+    if(!p.lat||!p.lon)return;
+    const mapsUrl='https://www.google.com/maps/dir/?api=1&destination='+p.lat+','+p.lon+'&travelmode=walking';
+    const popupHtml='<div style="min-width:140px"><strong>'+p.name+'</strong>'
+      +(p.capacity?'<br><span style="font-size:12px;color:#666">'+p.capacity+' places</span>':'')
+      +(p.fee?'<br><span style="font-size:11px;color:#ef4444;font-weight:600">Payant</span>':'')
+      +'<br><a href="'+mapsUrl+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;padding:5px 12px;background:#3b82f6;color:#fff;border-radius:6px;font-size:12px;font-weight:bold;text-decoration:none">Ouvrir dans Maps</a></div>';
+    L.marker([p.lat,p.lon],{icon:parkingIcon}).bindPopup(popupHtml).addTo(parkingLayer);
+  });
+  parkingLayer.addTo(map);
+
+  /* Index cotation + slider de filtre (après que tous les blocs, test inclus, soient chargés) */
+  buildGradeIndex();
+  initGradeSlider();
+
+  /* Charger les photos existantes depuis IndexedDB */
+  await refreshPhotoState();
+  updateStatus();
+}
+
+/* === Toggle blocs/rochers et parkings === */
+function toggleBlocs(){
+  blocsVisible=!blocsVisible;
+  const btn=document.getElementById('toggle-blocs');
+  if(blocsVisible){
+    if(blocCluster) map.addLayer(blocCluster);
+    if(rochersLayer) map.addLayer(rochersLayer);
+    btn.classList.add('active');
+  }else{
+    if(blocCluster) map.removeLayer(blocCluster);
+    if(rochersLayer) map.removeLayer(rochersLayer);
+    btn.classList.remove('active');
+  }
+}
+
+function toggleParkings(){
+  parkingsVisible=!parkingsVisible;
+  const btn=document.getElementById('toggle-parkings');
+  if(parkingsVisible){
+    if(parkingLayer) map.addLayer(parkingLayer);
+    btn.classList.add('active');
+  }else{
+    if(parkingLayer) map.removeLayer(parkingLayer);
+    btn.classList.remove('active');
+  }
+}
+
+/* === Filtre cotation === */
+const GRADES=['1','2','3a','3b','3c','4a','4b','4c','5a','5b','5c','6a','6a+','6b','6b+','6c','6c+','7a','7a+','7b','7b+','7c','7c+','8a','8a+','8b','8b+','8c','8c+','9a'];
+let blocGradeIdx={};        /* id -> index dans GRADES (-1 si inconnu) */
+let gradeFilterMin=0;
+let gradeFilterMax=GRADES.length-1;
+
+/* Normalise une cotation ("7B+ " -> "7b+") et renvoie son index, -1 si non reconnue */
+function gradeToIndex(g){
+  if(!g)return -1;
+  const norm=String(g).toLowerCase().replace(/\s/g,'');
+  return GRADES.indexOf(norm);
+}
+
+/* Construit l'index cotation pour tous les blocs chargés */
+function buildGradeIndex(){
+  blocsData.features.forEach(f=>{
+    blocGradeIdx[f.properties.id]=gradeToIndex(f.properties.grade);
+  });
+}
+
+/* Applique le filtre courant : reconstruit le cluster avec les blocs dans la fourchette */
+function applyGradeFilter(){
+  if(!blocCluster)return;
+  const full=(gradeFilterMin===0 && gradeFilterMax===GRADES.length-1);
+  const subset=[];
+  Object.keys(blocMarkers).forEach(id=>{
+    const idx=blocGradeIdx[id];
+    let keep;
+    if(idx<0) keep=full;                                  /* sans cotation : visible seulement si fourchette complète */
+    else keep=(idx>=gradeFilterMin && idx<=gradeFilterMax);
+    if(keep) subset.push(blocMarkers[id]);
+  });
+  blocCluster.clearLayers();
+  blocCluster.addLayers(subset);
+}
+
+/* Initialise le slider double une fois les données chargées */
+function initGradeSlider(){
+  const lo=document.getElementById('grade-lo');
+  const hi=document.getElementById('grade-hi');
+  const max=GRADES.length-1;
+  lo.max=max; hi.max=max;
+  lo.value=0; hi.value=max;
+  gradeFilterMin=0; gradeFilterMax=max;
+
+  function refresh(){
+    let a=parseInt(lo.value,10), b=parseInt(hi.value,10);
+    if(a>b){ const t=a; a=b; b=t; }                       /* poignées croisées : on borne sans bloquer */
+    gradeFilterMin=a; gradeFilterMax=b;
+    document.getElementById('grade-min-lbl').textContent=GRADES[a];
+    document.getElementById('grade-max-lbl').textContent=GRADES[b];
+    const fill=document.getElementById('grade-fill');
+    fill.style.left=(a/max*100)+'%';
+    fill.style.right=((max-b)/max*100)+'%';
+    /* bouton actif si la fourchette est resserrée */
+    document.getElementById('toggle-grade').classList.toggle('active',!(a===0&&b===max));
+    applyGradeFilter();
+  }
+  lo.addEventListener('input',refresh);
+  hi.addEventListener('input',refresh);
+  refresh();
+}
+
+function toggleGradePanel(){
+  document.getElementById('grade-panel').classList.toggle('open');
+}
+
+function getBlocColor(id){
+  if(photosMap[id]) return '#22c55e';/* photo prise (→ WikiClimb) = vert */
+  if(boolderPhotoIds.has(id)) return '#f97316';/* photo topo sur Boolder = orange */
+  return '#ef4444';/* aucune photo (ni Boolder ni WikiClimb) = rouge */
+}
+
+function updateBlocColor(id){
+  if(blocMarkers[id]){
+    blocMarkers[id].setStyle({fillColor:getBlocColor(id)});
+  }
+}
+
+function refreshPhotoState(){
+  /* Curseur : on lit blocIds/trace une photo à la fois, sans charger toutes les
+     images base64 en mémoire (cf. crash progressif). */
+  return new Promise((resolve,reject)=>{
+    photosMap={};
+    const tx=db.transaction('photos','readonly');
+    const req=tx.objectStore('photos').openCursor();
+    req.onsuccess=e=>{
+      const c=e.target.result;
+      if(c){
+        const p=c.value;
+        (p.blocIds||[]).forEach(bid=>{
+          if(!photosMap[bid])photosMap[bid]=[];
+          photosMap[bid].push({photoId:p.id,hasTrace:!!p.trace});
+        });
+        c.continue();
+      }else{
+        Object.keys(blocMarkers).forEach(id=>updateBlocColor(id));
+        resolve();
+      }
+    };
+    req.onerror=e=>reject(e);
+  });
+}
+
+/* === Popup bloc === */
+/* === Panneau bloc (split-screen : carte en haut, photo Boolder en bas) === */
+function openBlocPanel(id,lat,lon,props){
+  /* Retirer l'aura du bloc precedent */
+  if(selectedBlocId && blocMarkers[selectedBlocId]){
+    blocMarkers[selectedBlocId].setStyle({radius:8, weight:1.5});
+  }
+  currentBlocId=id;
+  selectedBlocId=id;
+  map.closePopup();
+
+  /* Aura : agrandir le marqueur selectionne avec bordure bleue epaisse */
+  if(blocMarkers[id]){
+    blocMarkers[id].setStyle({radius:14, weight:4, color:'#3b82f6'});
+    blocMarkers[id].bringToFront();
+  }
+
+  /* Remplir l'en-tete */
+  document.getElementById('panel-name').textContent=props.name||'Bloc #'+id;
+  document.getElementById('panel-grade').textContent=props.grade||'?';
+
+  /* Boutons d'action */
+  const btnPhoto=document.getElementById('panel-btn-photo');
+  btnPhoto.textContent=photosMap[id]?'Nouvelle photo':'Photo';
+  btnPhoto.onclick=()=>takePhoto(id);
+
+  document.getElementById('panel-btn-gallery').onclick=()=>chooseFromGallery(id);
+
+  const btnView=document.getElementById('panel-btn-view');
+  if(photosMap[id]){
+    btnView.style.display='';
+    btnView.onclick=()=>openPhotoView(id);
+  }else{
+    btnView.style.display='none';
+  }
+
+  const btnBoolder=document.getElementById('panel-btn-boolder');
+  const boolderUrl=props.boolderUrl||props.url||'';
+  if(boolderUrl){
+    btnBoolder.style.display='';
+    btnBoolder.href=boolderUrl;
+  }else{
+    btnBoolder.style.display='none';
+  }
+
+  /* Afficher le panneau + passer la carte en demi-ecran */
+  const panelEl=document.getElementById('bloc-panel');
+  const imgEl=document.getElementById('panel-img');
+  const loadingEl=document.getElementById('panel-loading');
+  const noPhotoEl=document.getElementById('panel-no-photo');
+  imgEl.style.display='none';
+  imgEl.src='';
+  loadingEl.style.display='';
+  noPhotoEl.style.display='none';
+
+  panelEl.classList.add('active');
+  document.getElementById('map').classList.add('half');
+  /* Attendre que le resize CSS soit applique, puis recalculer la carte et centrer */
+  setTimeout(()=>{
+    map.invalidateSize({animate:false});
+    map.panTo([lat,lon],{animate:true,duration:0.3});
+  },50);
+
+  /* Priorite : photo perso (IndexedDB) > photo Boolder */
+  if(photosMap[id]){
+    const photoId=photosMap[id][photosMap[id].length-1].photoId;
+    getPhoto(photoId).then(photo=>{
+      if(photo&&photo.image){
+        imgEl.onload=()=>{ loadingEl.style.display='none'; imgEl.style.display=''; };
+        imgEl.src=photo.image;
+      }else if(photo&&photo.synced){
+        loadingEl.style.display='none';
+        noPhotoEl.textContent='Photo synchronisee (sur le serveur)';
+        noPhotoEl.style.display='';
+      }else{
+        loadingEl.style.display='none';
+        noPhotoEl.style.display='';
+      }
+    }).catch(()=>{ loadingEl.style.display='none'; noPhotoEl.style.display=''; });
+  }else{
+    /* Pas de photo perso : charger la photo Boolder */
+    const boolderId=props.boolderId;
+    const topoId=boolderId && topoLookup ? topoLookup[boolderId] : null;
+    if(topoId){
+      const topoUrl='https://assets.boolder.com/proxy/topos/'+topoId;
+      imgEl.onload=()=>{
+        /* Boolder peut retourner 200 avec Content-Length:0 (photo vide) */
+        if(imgEl.naturalWidth===0){loadingEl.style.display='none';noPhotoEl.style.display='';return;}
+        loadingEl.style.display='none'; imgEl.style.display='';
+      };
+      imgEl.onerror=()=>{ loadingEl.style.display='none'; noPhotoEl.style.display=''; };
+      imgEl.src=topoUrl;
+    }else{
+      loadingEl.style.display='none';
+      noPhotoEl.style.display='';
+    }
+  }
+}
+
+function closeBlocPanel(){
+  document.getElementById('bloc-panel').classList.remove('active');
+  document.getElementById('map').classList.remove('half');
+  map.invalidateSize();
+  /* Retirer l'aura du bloc */
+  if(selectedBlocId && blocMarkers[selectedBlocId]){
+    blocMarkers[selectedBlocId].setStyle({radius:8, weight:1.5, color:'#fff'});
+    selectedBlocId=null;
+  }
+  currentBlocId=null;
+}
+
+/* === Prise / choix de photo ===
+   Deux inputs natifs : #camera-input (capture="environment" → caméra directe)
+   et #gallery-input (sans capture → sélecteur de fichier / galerie). */
+function pickPhoto(blocId,inputId){
+  currentBlocId=blocId;
+  /* La capture est prioritaire sur la sync : on annule tout upload en cours (libère
+     sa mémoire tout de suite) et on suspend la sync auto 60 s. Sinon, sur réseau
+     faible, un upload qui traîne + la caméra = dépassement mémoire → la webview se
+     recharge et la photo est perdue. */
+  if(syncAbort){ syncAbort.abort(); }
+  suppressSyncUntil=Date.now()+60000;
+  /* Filet de sécurité : sur mobile l'état JS peut être réinitialisé au retour de
+     l'appareil photo natif. On persiste l'id pour le relire en fallback (cf. change). */
+  try{ localStorage.setItem('wc-pending-bloc',blocId); }catch(e){}
+  document.getElementById(inputId).click();
+}
+function takePhoto(blocId){ pickPhoto(blocId,'camera-input'); }
+function chooseFromGallery(blocId){ pickPhoto(blocId,'gallery-input'); }
+
+/* Sélection d'un fichier (caméra ou galerie) → sauvegarde directe */
+async function onPhotoSelected(e){
+  const file=e.target.files[0];
+  if(!file)return;
+
+  const reader=new FileReader();
+  reader.onload=async function(){
+    /* Bloc cible : global, avec fallback localStorage si l'état JS a été réinitialisé
+       (retour d'appareil photo sur mobile). On refuse de sauver une photo orpheline. */
+    let blocId=currentBlocId;
+    if(!blocId){ try{ blocId=localStorage.getItem('wc-pending-bloc')||null; }catch(e){ blocId=null; } }
+    if(!blocId){ alert('Bloc cible perdu — reprends la photo.'); return; }
+    currentBlocId=blocId;
+
+    /* Lier automatiquement les blocs du meme rocher */
+    const linkedIds=[blocId];
+    const siblings=photoGroupMap[blocId]||null;
+    if(siblings){siblings.forEach(sid=>{if(!linkedIds.includes(sid))linkedIds.push(sid)})}
+
+    const photoData={
+      blocIds:linkedIds,
+      image:reader.result,
+      latitude:lastGpsPos?lastGpsPos.lat:null,
+      longitude:lastGpsPos?lastGpsPos.lng:null,
+      timestamp:Date.now(),
+      synced:false
+    };
+    const photoId=await addPhoto(photoData);
+    try{ localStorage.removeItem('wc-pending-bloc'); }catch(e){ /* ignore */ }
+    await refreshPhotoState();
+    updateStatus();
+
+    /* Revenir au panneau bloc avec la photo qu'on vient de prendre */
+    const feat=blocsData.features.find(f=>f.properties.id===currentBlocId);
+    if(feat){
+      const[lon,lat]=feat.geometry.coordinates;
+      openBlocPanel(currentBlocId,lat,lon,feat.properties);
+    }
+  };
+  reader.readAsDataURL(file);
+  e.target.value='';
+}
+document.getElementById('camera-input').addEventListener('change',onPhotoSelected);
+document.getElementById('gallery-input').addEventListener('change',onPhotoSelected);
+
+/* === Mode photo (association blocs) === */
+const CHIP_COLORS=['#f97316','#3b82f6','#22c55e','#a855f7','#ec4899','#eab308','#06b6d4','#ef4444'];
+let currentPhotoData=null;
+let linkMode=false;
+let linkHighlightIds=null;/* Set des blocs surlignés pendant le mode liaison */
+
+function openPhotoView(blocId){
+  const photos=photosMap[blocId];
+  if(!photos||!photos.length)return;
+  const photoId=photos[photos.length-1].photoId;
+  currentBlocId=blocId;
+  currentPhotoId=photoId;
+  const tx=db.transaction('photos','readonly');
+  const req=tx.objectStore('photos').get(photoId);
+  req.onsuccess=()=>{if(req.result)openPhotoModal(req.result)};
+}
+
+function openPhotoModal(photoData){
+  currentPhotoData=photoData;
+  currentPhotoId=photoData.id;
+  linkMode=false;
+  const imgEl=document.getElementById('photo-img');
+  if(photoData.image){ imgEl.src=photoData.image; imgEl.style.display=''; }
+  else { imgEl.removeAttribute('src'); imgEl.style.display='none'; }/* image sur le serveur */
+  document.getElementById('photo-modal').classList.add('active');
+  map.closePopup();
+  renderBlocChips();
+}
+
+function closePhotoModal(){
+  document.getElementById('photo-modal').classList.remove('active');
+  linkMode=false;
+  currentPhotoData=null;
+}
+
+function saveAndClose(){
+  closePhotoModal();
+  autoSync(true);/* l'utilisateur a fini de lier : on tente d'envoyer en arrière-plan */
+}
+
+/* Chips des blocs lies a la photo */
+function renderBlocChips(){
+  const container=document.getElementById('bloc-chips');
+  const ids=currentPhotoData.blocIds||[];
+  let html='';
+  ids.forEach((bid,i)=>{
+    const feat=blocsData.features.find(f=>f.properties.id===bid);
+    const name=feat?(feat.properties.name||'#'+bid)+'<span style="font-size:10px;opacity:.7"> '+feat.properties.grade+'</span>':'#'+bid;
+    const color=CHIP_COLORS[i%CHIP_COLORS.length];
+    html+='<span style="background:'+color+';color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">'
+      +name+'<button onclick="unlinkBloc(\''+bid+'\')" style="border:none;background:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:13px;padding:0 2px">&times;</button></span>';
+  });
+  container.innerHTML=html;
+  document.getElementById('modal-title').textContent=ids.length+' bloc(s)';
+}
+
+/* Retirer un bloc de la photo */
+async function unlinkBloc(bid){
+  if(!currentPhotoData)return;
+  currentPhotoData.blocIds=currentPhotoData.blocIds.filter(id=>id!==bid);
+  await updatePhoto(currentPhotoData);
+  await refreshPhotoState();
+  updateStatus();
+  renderBlocChips();
+}
+
+/* === Mode liaison depuis la carte ===
+   On masque le modal (sans effacer currentPhotoData), puis chaque tap sur un bloc le
+   lie/délie à la photo courante, sans rouvrir le modal, jusqu'à "Terminer". */
+function setLinkHighlight(id,on){
+  const m=blocMarkers[id];
+  if(!m) return;
+  if(on) m.setStyle({fillColor:'#1d4ed8',color:'#fbbf24',weight:3});
+  else m.setStyle({fillColor:getBlocColor(id),color:'#fff',weight:1.5});
+}
+
+function updateLinkBar(){
+  const n=currentPhotoData?(currentPhotoData.blocIds||[]).length:0;
+  document.getElementById('link-bar-text').textContent='Touchez les blocs à lier — '+n+' lié'+(n>1?'s':'');
+}
+
+function startLinkMode(){
+  if(!currentPhotoData) return;
+  linkMode=true;
+  /* Masquer le modal SANS effacer l'état (contrairement à closePhotoModal). */
+  document.getElementById('photo-modal').classList.remove('active');
+  document.getElementById('link-bar').classList.add('active');
+  linkHighlightIds=new Set();
+  (currentPhotoData.blocIds||[]).forEach(id=>{ linkHighlightIds.add(id); setLinkHighlight(id,true); });
+  updateLinkBar();
+}
+
+async function toggleLinkBloc(id){
+  if(!currentPhotoData) return;
+  if(currentPhotoData.blocIds.includes(id)){
+    currentPhotoData.blocIds=currentPhotoData.blocIds.filter(b=>b!==id);
+    linkHighlightIds.delete(id); setLinkHighlight(id,false);
+  }else{
+    currentPhotoData.blocIds.push(id);
+    linkHighlightIds.add(id); setLinkHighlight(id,true);
+  }
+  await updatePhoto(currentPhotoData);/* persiste à chaque tap ; pas de refresh ici (garderait la surbrillance) */
+  updateLinkBar();
+}
+
+function endLinkMode(){
+  linkMode=false;
+  document.getElementById('link-bar').classList.remove('active');
+  if(linkHighlightIds){ linkHighlightIds.forEach(id=>setLinkHighlight(id,false)); linkHighlightIds=null; }
+  currentPhotoData=null;
+  refreshPhotoState().then(()=>{ updateStatus(); autoSync(true); });
+}
+
+/* Clic sur un bloc */
+function handleBlocClick(id,lat,lon,props){
+  if(linkMode){
+    toggleLinkBloc(id);
+    return;
+  }
+  openBlocPanel(id,lat,lon,props);
+}
+
+/* Catmull-Rom pour l'affichage des traces dans les popups (tracees sur WikiClimb) */
+function catmullRomToSVG(points){
+  if(points.length<2)return'';
+  if(points.length===2)return'M'+points[0].x+','+points[0].y+'L'+points[1].x+','+points[1].y;
+  let d='M'+points[0].x+','+points[0].y;
+  for(let i=0;i<points.length-1;i++){
+    const p0=points[Math.max(i-1,0)],p1=points[i],p2=points[i+1],p3=points[Math.min(i+2,points.length-1)];
+    const t=0.3;
+    const cp1x=parseFloat(p1.x)+(parseFloat(p2.x)-parseFloat(p0.x))*t;
+    const cp1y=parseFloat(p1.y)+(parseFloat(p2.y)-parseFloat(p0.y))*t;
+    const cp2x=parseFloat(p2.x)-(parseFloat(p3.x)-parseFloat(p1.x))*t;
+    const cp2y=parseFloat(p2.y)-(parseFloat(p3.y)-parseFloat(p1.y))*t;
+    d+='C'+cp1x.toFixed(2)+','+cp1y.toFixed(2)+' '+cp2x.toFixed(2)+','+cp2y.toFixed(2)+' '+p2.x+','+p2.y;
+  }
+  return d;
+}
+
+/* === Sync serveur WikiClimb === */
+const SYNC_URL='https://wiki-climb.com/api/field/photos';
+const FIELD_TOKEN='ce8b9a228b00c5a0d177af8b758d9a2a16cd14f517104fcaaa3c41519c709b2e';
+
+let syncing=false;
+let syncAbort=null;        /* AbortController de l'upload en cours (annulable par une capture) */
+let suppressSyncUntil=0;   /* pas de sync auto avant ce timestamp (fenêtre après une capture) */
+const UPLOAD_TIMEOUT=30000;
+
+/* Réseau jugé trop faible pour synchroniser (API dispo surtout sur Android). */
+function connectionIsSlow(){
+  const c=navigator.connection;
+  return !!c && (c.saveData || c.effectiveType==='2g' || c.effectiveType==='slow-2g');
+}
+
+/* Envoie une photo au serveur. Renvoie son serverId, ou lève en cas d'échec/abandon. */
+async function uploadPhoto(p,signal){
+  const blob=await(await fetch(p.image)).blob();
+  const fd=new FormData();
+  fd.append('photo',blob,'field-photo.jpg');
+  fd.append('blocIds',JSON.stringify(p.blocIds||[]));
+  if(p.latitude)fd.append('latitude',String(p.latitude));
+  if(p.longitude)fd.append('longitude',String(p.longitude));
+  const res=await fetch(SYNC_URL,{method:'POST',body:fd,headers:{'X-Field-Token':FIELD_TOKEN},signal});
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  return (await res.json()).id;
+}
+
+/* Envoie les photos non synchronisées, une à la fois (mémoire bornée), puis LIBÈRE
+   l'image localement (l'image est sur le serveur ; on garde la métadonnée pour que
+   le bloc reste vert). En mode silent (auto) : pas d'alerte, s'arrête si réseau coupé,
+   si une capture est en cours, ou sur réseau trop lent. */
+/* Conditions où la sync auto (silencieuse) doit s'abstenir, pour laisser la mémoire
+   à une capture/liaison en cours ou éviter un upload qui traîne sur réseau lent. */
+function autoSyncBlocked(silent){
+  if(syncing) return true;
+  if(!silent) return false;/* déclenchement manuel : on force */
+  if(Date.now()<suppressSyncUntil) return true;/* capture récente */
+  if(linkMode) return true;/* liaison de blocs en cours */
+  if(document.getElementById('photo-modal').classList.contains('active')) return true;
+  if(connectionIsSlow()) return true;
+  return false;
+}
+
+async function autoSync(silent){
+  if(silent) return;/* Synchro automatique désactivée : envoi uniquement via le bouton Sync */
+  if(autoSyncBlocked(silent)) return;
+  if(!navigator.onLine){ if(!silent){ alert('Hors ligne — réessaie quand tu auras du réseau.'); } return; }
+  const ids=await getUnsyncedIds();
+  if(!ids.length){ if(!silent){ alert('Tout est synchronisé !'); } return; }
+
+  syncing=true;
+  const statusEl=document.getElementById('status-text');
+  let success=0,errors=0,stopped=false;
+
+  for(let i=0;i<ids.length;i++){
+    if(!navigator.onLine) break;/* réseau perdu : on reprendra plus tard */
+    if(silent && Date.now()<suppressSyncUntil) break;/* une capture vient de démarrer */
+    const p=await getPhoto(ids[i]);
+    if(!p||!p.image){ continue; }
+    statusEl.textContent=`Sync ${i+1}/${ids.length}...`;
+    syncAbort=new AbortController();
+    const to=setTimeout(()=>syncAbort.abort(),UPLOAD_TIMEOUT);
+    try{
+      const serverId=await uploadPhoto(p,syncAbort.signal);
+      p.synced=true;
+      p.serverId=serverId;
+      delete p.image;/* libère le stockage : l'image vit désormais sur le serveur */
+      await updatePhoto(p);
+      success++;
+    }catch(e){
+      errors++;
+      /* Abandon (capture en cours ou timeout réseau) : on libère et on reprendra plus tard. */
+      if(e.name==='AbortError'){ stopped=true; break; }
+      console.error('Sync erreur:',e);
+      if(!navigator.onLine) break;
+    }finally{
+      clearTimeout(to);
+      syncAbort=null;
+    }
+  }
+
+  syncing=false;
+  await refreshPhotoState();
+  await updateStatus();
+  if(!silent && !stopped){
+    if(errors)alert(success+' photo(s) envoyées, '+errors+' erreur(s)');
+    else alert(success+' photo(s) envoyées sur wiki-climb.com !');
+  }
+}
+
+/* Bouton manuel "Sync" */
+function syncPhotos(){ autoSync(false); }
+
+/* Liberer l'espace : supprimer les photos syncees du telephone */
+async function cleanSynced(){
+  const photos=await getAllPhotos();
+  const synced=photos.filter(p=>p.synced);
+  if(!synced.length){alert('Rien a nettoyer');return}
+  if(!confirm(synced.length+' photos syncees seront supprimees du telephone. Continuer ?'))return;
+  for(const p of synced) await deletePhoto(p.id);
+  await refreshPhotoState();
+  updateStatus();
+  alert(synced.length+' photos supprimees du telephone');
+}
+
+/* === Exporter toutes les données (photos + associations) en JSON téléchargeable === */
+async function exportData(){
+  const photos=await getAllPhotos();
+  if(!photos.length){ alert('Aucune photo à exporter'); return; }
+
+  const statusEl=document.getElementById('status-text');
+  statusEl.textContent='Export en cours...';
+
+  /* Construire l'export : chaque photo avec ses métadonnées */
+  const exportPhotos=photos.map(p=>({
+    id:p.id,
+    blocIds:p.blocIds||[],
+    latitude:p.latitude,
+    longitude:p.longitude,
+    timestamp:p.timestamp,
+    image:p.image, /* base64 complet */
+    traces:p.traces||null
+  }));
+
+  const exportObj={
+    version:1,
+    exportDate:new Date().toISOString(),
+    photoCount:exportPhotos.length,
+    photos:exportPhotos
+  };
+
+  /* Générer le fichier et déclencher le téléchargement */
+  const json=JSON.stringify(exportObj);
+  const blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='wikiclimb-field-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  statusEl.textContent=photos.length+' photos exportées';
+  setTimeout(updateStatus,3000);
+}
+
+/* === Vider toutes les photos de l'IndexedDB (après export) === */
+async function clearAllPhotos(){
+  const photos=await getAllPhotos();
+  if(!photos.length){ alert('Aucune photo à supprimer'); return; }
+  if(!confirm(photos.length+' photo(s) seront supprimées du téléphone.\nAssure-toi d\'avoir exporté avant !\n\nContinuer ?')) return;
+  for(const p of photos) await deletePhoto(p.id);
+  await refreshPhotoState();
+  updateStatus();
+  alert(photos.length+' photo(s) supprimées');
+}
+
+/* === Status bar === */
+async function updateStatus(){
+  const {total,unsynced}=await getPhotoCounts();
+
+  let text='Prêt';
+  if(total>0){
+    text=total+' photo'+(total>1?'s':'');
+    if(unsynced>0) text+=' ('+unsynced+' à sync)';
+    else text+=' (tout sync)';
+  }
+  document.getElementById('status-text').textContent=text;
+}
+
+/* === Init === */
+openDB().then(()=>loadData()).then(()=>{
+  /* Sync auto : au démarrage (reliquat de la session précédente), au retour du réseau,
+     et toutes les 3 min en tâche de fond. Une image est libérée du téléphone dès
+     qu'elle est sur le serveur. */
+  freeSyncedImages().then(()=>autoSync(true));
+  window.addEventListener('online',()=>autoSync(true));
+  setInterval(()=>autoSync(true),3*60*1000);
+});
+</script>
+</body>
+</html>
