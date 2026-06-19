@@ -89,23 +89,7 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
 #link-bar.active { display:flex; }
 #link-bar span { font-size:13px; font-weight:600; }
 #link-bar button { background:#fbbf24; color:#1e293b; border:none; padding:6px 16px; border-radius:6px; font-size:13px; font-weight:bold; cursor:pointer; white-space:nowrap; }
-/* --- Marqueur de position avec direction --- */
-.gps-divicon{background:none;border:none;}
-.gps-wrap{position:relative;width:24px;height:24px;}
-.gps-dot{position:absolute;top:50%;left:50%;width:16px;height:16px;
-  transform:translate(-50%,-50%);background:#4285F4;border:3px solid #fff;
-  border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.4);box-sizing:border-box;}
-/* Le cône part du centre du point et s'évase vers la direction du regard.
-   Pointe en bas (origine), il est tourné via rotate(headingDeg). */
-.gps-cone{position:absolute;bottom:50%;left:50%;width:34px;height:34px;
-  transform-origin:50% 100%;
-  background:conic-gradient(from -20deg at 50% 100%,
-    rgba(66,133,244,0) 0deg,
-    rgba(66,133,244,.55) 20deg,
-    rgba(66,133,244,0) 40deg);
-  clip-path:polygon(50% 100%, 0 0, 100% 0);
-  pointer-events:none;}
-
+</style>
 </head>
 <body>
 
@@ -142,7 +126,6 @@ body { font-family: -apple-system, sans-serif; background:#1e1e1e; color:#fff; }
   <span id="status-text">Chargement...</span>
   <div style="display:flex;gap:6px;align-items:center">
     <span id="gps-info" style="color:#4285F4;font-weight:bold">GPS: ...</span>
-    <span id="compass-info" style="color:#f59e0b;font-weight:bold;font-size:11px">⊙ --</span>
     <button onclick="syncPhotos()" style="background:#22c55e;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:bold">Sync</button>
     <button onclick="exportData()" style="background:#3b82f6;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">JSON</button>
   </div>
@@ -339,6 +322,7 @@ const map=L.map('map',{
   zoomControl:false,
   attributionControl:false
 }).setView([48.41,2.63],13);
+window.map=map;/* expose la carte pour compass.js (cône de direction) */
 
 L.control.zoom({position:'topright'}).addTo(map);
 
@@ -380,28 +364,14 @@ let gpsMarker=null;
 let gpsAccuracy=null;
 let lastGpsPos=null;
 let followGps=true; /* centrer la carte sur la position au démarrage */
-let headingDeg=null; /* cap boussole en degrés (0=Nord), null si inconnu */
-
-/* Icône de position avec cône de direction (style Google Maps).
-   Le cône n'apparaît que si on connaît l'orientation. */
-function buildGpsIcon(){
-  const cone = (headingDeg===null) ? '' :
-    '<div class="gps-cone" style="transform:translateX(-50%) rotate('+headingDeg+'deg)"></div>';
-  return L.divIcon({
-    className:'gps-divicon',
-    iconSize:[24,24],
-    iconAnchor:[12,12],
-    html:'<div class="gps-wrap">'+cone+'<div class="gps-dot"></div></div>'
-  });
-}
 
 map.on('locationfound',e=>{
   lastGpsPos=e.latlng;
   const acc=e.accuracy; /* précision en mètres */
 
   if(!gpsMarker){
-    /* Marqueur position + cône de direction */
-    gpsMarker=L.marker(e.latlng,{icon:buildGpsIcon(),interactive:false,zIndexOffset:1000}).addTo(map);
+    /* Point bleu */
+    gpsMarker=L.circleMarker(e.latlng,{radius:8,color:'#fff',fillColor:'#4285F4',fillOpacity:1,weight:3}).addTo(map);
     /* Cercle de précision */
     gpsAccuracy=L.circle(e.latlng,{radius:acc,color:'#4285F4',fillColor:'#4285F4',fillOpacity:0.1,weight:1,interactive:false}).addTo(map);
     /* Premier fix : centrer la carte */
@@ -418,81 +388,6 @@ map.on('locationfound',e=>{
   /* Afficher la précision dans la status bar */
   document.getElementById('gps-info').textContent='GPS: '+Math.round(acc)+'m';
 });
-
-/* Met à jour seulement la rotation du cône (sans recréer le marqueur). */
-function refreshGpsHeading(){
-  if(!gpsMarker) return;
-  const el=gpsMarker.getElement();
-  if(!el) return;
-  let cone=el.querySelector('.gps-cone');
-  if(headingDeg===null){ if(cone) cone.style.display='none'; return; }
-  if(!cone){
-    /* le cône n'existait pas encore (orientation arrivée après le 1er fix) */
-    const wrap=el.querySelector('.gps-wrap');
-    if(wrap){ cone=document.createElement('div'); cone.className='gps-cone'; wrap.insertBefore(cone,wrap.firstChild); }
-  }
-  if(cone){ cone.style.display='block'; cone.style.transform='translateX(-50%) rotate('+headingDeg+'deg)'; }
-}
-
-/* --- Boussole : orientation du téléphone --- */
-let compassStarted=false;
-let compassGotEvent=false;
-function setCompassInfo(txt){ const el=document.getElementById('compass-info'); if(el) el.textContent=txt; }
-
-function handleOrientation(ev){
-  compassGotEvent=true;
-  let h=null;
-  if(typeof ev.webkitCompassHeading==='number'){
-    h=ev.webkitCompassHeading; /* iOS : déjà par rapport au Nord, sens horaire */
-  } else if(ev.absolute===true && typeof ev.alpha==='number'){
-    /* Android, orientation absolue : alpha = angle / Nord. */
-    h=360-ev.alpha;
-  } else if(typeof ev.alpha==='number'){
-    /* Fallback : alpha relatif (mieux que rien). */
-    h=360-ev.alpha;
-  }
-  if(h===null||isNaN(h)){ setCompassInfo('⊙ n/a'); return; }
-  /* Compenser la rotation de l'écran si dispo. */
-  if(screen.orientation && typeof screen.orientation.angle==='number'){ h-=screen.orientation.angle; }
-  h=((h%360)+360)%360;
-  /* Lissage léger pour éviter le tremblement de l'aiguille */
-  if(headingDeg===null) headingDeg=h;
-  else{
-    let diff=h-headingDeg;
-    while(diff>180) diff-=360; while(diff<-180) diff+=360;
-    headingDeg=((headingDeg+diff*0.25)%360+360)%360;
-  }
-  setCompassInfo('⊙ '+Math.round(headingDeg)+'°');
-  refreshGpsHeading();
-}
-
-function attachCompass(){
-  /* On écoute les DEUX événements : certains Android ne déclenchent que
-     l'un ou l'autre. handleOrientation déduplique via la valeur. */
-  if('ondeviceorientationabsolute' in window){
-    window.addEventListener('deviceorientationabsolute',handleOrientation,true);
-  }
-  window.addEventListener('deviceorientation',handleOrientation,true);
-  /* Si rien n'arrive au bout de 2s, on l'indique clairement. */
-  setTimeout(()=>{ if(!compassGotEvent) setCompassInfo('⊙ aucun signal'); },2000);
-}
-
-function startCompass(){
-  if(compassStarted) return; compassStarted=true;
-  /* iOS 13+ exige une autorisation déclenchée par un geste utilisateur. */
-  if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
-    DeviceOrientationEvent.requestPermission().then(state=>{
-      if(state==='granted'){ attachCompass(); } else { setCompassInfo('⊙ refusé'); }
-    }).catch(()=>{ setCompassInfo('⊙ refusé'); });
-  } else {
-    attachCompass();
-  }
-}
-/* On tente au chargement (Android n'a pas besoin de geste)... */
-startCompass();
-/* ...et aussi au premier toucher (obligatoire iOS, et filet de sécurité Android). */
-document.addEventListener('touchend',function once(){ startCompass(); },{once:true});
-map.on('click',startCompass);
 
 map.on('locationerror',e=>{
   document.getElementById('gps-info').textContent='GPS: erreur';
@@ -1202,7 +1097,6 @@ function autoSyncBlocked(silent){
 }
 
 async function autoSync(silent){
-  if(silent) return;/* Synchro automatique désactivée : envoi uniquement via le bouton Sync */
   if(autoSyncBlocked(silent)) return;
   if(!navigator.onLine){ if(!silent){ alert('Hors ligne — réessaie quand tu auras du réseau.'); } return; }
   const ids=await getUnsyncedIds();
@@ -1339,5 +1233,6 @@ openDB().then(()=>loadData()).then(()=>{
   setInterval(()=>autoSync(true),3*60*1000);
 });
 </script>
+<script src="compass.js"></script>
 </body>
 </html>
